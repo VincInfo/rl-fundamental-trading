@@ -72,7 +72,9 @@ r_{i,t\rightarrow t+H}
 r_{benchmark,t\rightarrow t+H}
 ```
 
+
 Hier beschreibt $y_{i,t}^{active}$ die Rendite der Aktie abzüglich der Rendite eines Benchmarks im gleichen Zeitraum. Das Modell prognostiziert dann nicht die absolute Entwicklung, sondern die erwartete Out- oder Underperformance.
+
 
 XGBoost lernt aus den historischen Trainingsdaten die Abbildung:
 
