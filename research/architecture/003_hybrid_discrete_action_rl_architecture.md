@@ -108,12 +108,6 @@ Für einen Rebalancing-Zeitpunkt werden die Prognosen aller `N` betrachteten Akt
 
 Dabei bezeichnet `N` die Anzahl der Aktien im aktuellen Universum. Der Alpha-Vektor enthält somit für jede Aktie genau einen prognostizierten Alpha-Score. Er wird anschließend für das Risk Adjustment und als Bestandteil des States des RL-Agenten verwendet.
 
-Ein überwachtes Modell wie **XGBoost oder LightGBM** erzeugt für Aktie `i` zum Zeitpunkt `t` einen Alpha-Score, beispielsweise die erwartete Rendite über den noch festzulegenden Horizont `H`:
-
-```math
-\alpha_{i,t}=\hat r_{i,t+H}
-```
-
 Ein positives bzw. negatives Alpha signalisiert eine erwartete positive bzw. negative Entwicklung; der Betrag beschreibt die Signalstärke.
 
 ## 4. Risk Estimation & Risk-Adjusted Alpha
