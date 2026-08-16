@@ -82,7 +82,7 @@ f_\theta(\mathbf{x}_{i,t})
 \hat r_{i,t+H}
 ```
 
-Dabei ist $f_\theta$ das Alpha-Modell mit den gelernten Modellparametern $\theta$. Es verarbeitet den Feature-Vektor $\mathbf{x}_{i,t}$ und prognostiziert mit $\hat r_{i,t+H}$ die Rendite der Aktie über die nächsten `H` Handelstage.
+Dabei ist $f_\theta$ das Alpha-Modell mit den gelernten Modellparametern $\theta$. Es verarbeitet den Feature-Vektor $\mathbf{x}_{i,t}$ und prognostiziert mit $\hat{r}_{i,t+H}$ die Rendite der Aktie über die nächsten `H` Handelstage.
 
 Der Modelloutput wird als Alpha-Score verwendet:
 
