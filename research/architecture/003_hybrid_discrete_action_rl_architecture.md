@@ -31,7 +31,7 @@ Als erste Implementierung wird XGBoost als überwachtes Alpha-Modell verwendet. 
 
 Das Alpha-Modell wird für jede Aktie `i` und jeden Entscheidungszeitpunkt `t` angewendet. Sein Input ist ein Feature-Vektor:
 
-$$
+```math
 \mathbf{x}_{i,t}
 =
 [
@@ -39,7 +39,7 @@ $$
 \text{Fundamental Features}_{i,t},
 \text{Context Features}_t
 ]
-$$
+```
 
 Dabei steht $\mathbf{x}_{i,t}$ für alle zum Zeitpunkt `t` verfügbaren Informationen zur Aktie `i`. Dazu gehören beispielsweise vergangene Returns, Momentum, Volatilität, Volumen, relative Performance, Wachstum, Margen, ROE/ROIC, Verschuldung und Bewertungskennzahlen. Context Features können zusätzlich Markt-, Sektor- oder Regimeinformationen enthalten.
 
@@ -47,13 +47,13 @@ Alle Features müssen **Point-in-Time korrekt** sein: Es dürfen nur Information
 
 Das Trainingsziel $y_{i,t}$ ist beispielsweise die nach `H` Handelstagen realisierte Rendite:
 
-$$
+```math
 y_{i,t}
 =
 r_{i,t\rightarrow t+H}
 =
 \frac{P_{i,t+H}}{P_{i,t}}-1
-$$
+```
 
 Dabei bezeichnet:
 
@@ -64,33 +64,33 @@ Dabei bezeichnet:
 
 Alternativ kann eine markt- oder sektorbereinigte Rendite verwendet werden:
 
-$$
+```math
 y_{i,t}^{active}
 =
 r_{i,t\rightarrow t+H}
 -
 r_{benchmark,t\rightarrow t+H}
-$$
+```
 
 Hier beschreibt $y_{i,t}^{active}$ die Rendite der Aktie abzüglich der Rendite eines Benchmarks im gleichen Zeitraum. Das Modell prognostiziert dann nicht die absolute Entwicklung, sondern die erwartete Out- oder Underperformance.
 
 XGBoost lernt aus den historischen Trainingsdaten die Abbildung:
 
-$$
+```math
 f_\theta(\mathbf{x}_{i,t})
 \rightarrow
 \hat r_{i,t+H}
-$$
+```
 
 Dabei ist $f_\theta$ das Alpha-Modell mit den gelernten Modellparametern $\theta$. Es verarbeitet den Feature-Vektor $\mathbf{x}_{i,t}$ und prognostiziert mit $\hat r_{i,t+H}$ die Rendite der Aktie über die nächsten `H` Handelstage.
 
 Der Modelloutput wird als Alpha-Score verwendet:
 
-$$
+```math
 \alpha_{i,t}
 =
 \hat r_{i,t+H}
-$$
+```
 
 Damit gilt:
 
@@ -100,19 +100,19 @@ Damit gilt:
 
 Für einen Rebalancing-Zeitpunkt werden die Prognosen aller `N` betrachteten Aktien zu einem Alpha-Vektor zusammengefasst:
 
-$$
+```math
 \boldsymbol{\alpha}_t
 =
 [\alpha_{1,t},\alpha_{2,t},\ldots,\alpha_{N,t}]
-$$
+```
 
 Dabei bezeichnet `N` die Anzahl der Aktien im aktuellen Universum. Der Alpha-Vektor enthält somit für jede Aktie genau einen prognostizierten Alpha-Score. Er wird anschließend für das Risk Adjustment und als Bestandteil des States des RL-Agenten verwendet.
 
 Ein überwachtes Modell wie **XGBoost oder LightGBM** erzeugt für Aktie `i` zum Zeitpunkt `t` einen Alpha-Score, beispielsweise die erwartete Rendite über den noch festzulegenden Horizont `H`:
 
-$$
+```math
 \alpha_{i,t}=\hat r_{i,t+H}
-$$
+```
 
 Ein positives bzw. negatives Alpha signalisiert eine erwartete positive bzw. negative Entwicklung; der Betrag beschreibt die Signalstärke.
 
@@ -122,11 +122,11 @@ Als erste Risikoschätzung dient die historische rollierende Volatilität $\sigm
 
 Alpha und Risiko werden zu einem risikoadjustierten Signal kombiniert:
 
-$$
+```math
 z_{i,t}
 =
 \frac{|\alpha_{i,t}|}{\sigma_{i,t}}
-$$
+```
 
 Dabei bezeichnet:
 
@@ -139,17 +139,17 @@ Ein starkes Alpha bei geringer Volatilität erzeugt somit einen höheren Wert al
 
 Anschließend wird $z_{i,t}$ über alle `N` Aktien des zum Zeitpunkt `t` betrachteten Universums normalisiert:
 
-$$
+```math
 q_{i,t}
 =
 \frac{z_{i,t}}{\sum_{j=1}^{N}z_{j,t}}
-$$
+```
 
 Der Index `j` iteriert dabei über alle Aktien des aktuellen Universums. Der Nenner ist die Summe ihrer risikoadjustierten Signalstärken. Dadurch gilt:
 
-$$
+```math
 \sum_{i=1}^{N}q_{i,t}=1
-$$
+```
 
 $q_{i,t}$ beschreibt den relativen Anteil der risikoadjustierten Opportunity einer Aktie und dient später dem Position Sizing. Für die Implementierung sollte im Nenner von $z_{i,t}$ zusätzlich ein kleiner Wert $\varepsilon$ berücksichtigt werden, damit eine Volatilität von null nicht zu einer Division durch null führt.
 
@@ -163,7 +163,7 @@ Das RL Environment verbindet das mit XGBoost implementierte Alpha-Modell mit der
 
 Ein möglicher State ist:
 
-$$
+```math
 s_t=
 [
 \boldsymbol{\alpha}_t,
@@ -172,7 +172,7 @@ s_t=
 \mathbf{r}_t,
 \mathbf{m}_t
 ]
-$$
+```
 
 Dabei bezeichnet:
 
@@ -188,18 +188,18 @@ Der State $s_t$ ist somit der Input des RL-Agenten. Die Bestandteile werden typi
 
 Der Output des Agenten ist für jede Aktie `i` eine diskrete Aktion:
 
-$$
+```math
 a_{i,t}\in\{-1,0,+1\},
 \qquad
 -1=SELL,\;0=HOLD,\;+1=BUY
-$$
+```
 
 Über alle `N` Aktien entsteht der Aktionsvektor:
 
-$$
+```math
 \mathbf{a}_t=
 [a_{1,t},a_{2,t},\ldots,a_{N,t}]
-$$
+```
 
 Der Agent entscheidet damit, **ob und in welche Richtung** gehandelt wird, nicht über die Positionsgröße. Diese wird anschließend durch die separate Position-Sizing-Regel berechnet.
 
@@ -215,11 +215,11 @@ Eine gemeinsame Klassifikation aller Aktionskombinationen wird vermieden, da bei
 
 Die Position-Sizing-Regel übersetzt die diskrete RL-Aktion in eine konkrete Veränderung des Portfolio-Gewichts:
 
-$$
+```math
 \Delta w_{i,t}
 =
 a_{i,t}\cdot B_t\cdot q_{i,t}
-$$
+```
 
 Dabei bezeichnet:
 
@@ -234,21 +234,21 @@ Ein Buy bei einem hohen $q_{i,t}$ führt zu einem größeren Kauf als bei einem 
 
 Nach dem Position Sizing werden zunächst die vorgeschlagenen Zielgewichte berechnet:
 
-$$
+```math
 w_{i,t}^{target}
 =
 w_{i,t-1}+\Delta w_{i,t}
-$$
+```
 
 Dabei ist $w_{i,t-1}$ das bisherige Portfolio-Gewicht und $\Delta w_{i,t}$ die in Abschnitt 6 berechnete Positionsänderung. Vor der Ausführung werden diese Zielgewichte auf einen zulässigen Portfolioraum begrenzt.
 
 Für eine erste **Long-only-Implementierung** gilt beispielsweise:
 
-$$
+```math
 0\leq w_{i,t}\leq w_{max},
 \qquad
 \sum_i w_{i,t}\leq1
-$$
+```
 
 Damit kann keine Aktie negativ gewichtet werden, das Gewicht einer einzelnen Aktie ist auf $w_{max}$ begrenzt und das Portfolio investiert insgesamt nicht mehr als 100 % des verfügbaren Kapitals. Weitere Regeln können das Rebalancing-Budget begrenzen und Leverage ausschließen. Nicht investiertes Kapital wird als Cash gehalten.
 
@@ -258,28 +258,28 @@ Die Constraints bilden somit die Sicherheitsschicht zwischen den vom Modell vorg
 
 Nach Anwendung der Portfolio Constraints werden die zulässigen Zielgewichte durch Käufe und Verkäufe umgesetzt. Der dabei entstehende Turnover misst die gesamte tatsächlich ausgeführte Portfolioveränderung:
 
-$$
+```math
 Turnover_t
 =
 \sum_{i=1}^{N}
 |w_{i,t}-w_{i,t-1}|
-$$
+```
 
 Dabei sind $w_{i,t-1}$ und $w_{i,t}$ die Portfolio-Gewichte vor und nach dem Rebalancing. Über `i` wird dabei über alle `N` Aktien des Portfolios iteriert. Die Transaktionskosten $C_t$ können zunächst proportional zum Turnover modelliert werden:
 
-$$
+```math
 C_t=c_{TC}\cdot Turnover_t
-$$
+```
 
 Dabei bezeichnet $c_{TC}$ den angenommenen Kostensatz. Der Reward ergibt sich anschließend aus der Portfoliorendite nach Berücksichtigung dieser Kosten:
 
-$$
+```math
 R_{t+1}
 =
 r^{portfolio}_{t+1}
 -
 \lambda_{TC}C_t
-$$
+```
 
 $r^{portfolio}_{t+1}$ ist die nach dem Rebalancing erzielte Rendite und $\lambda_{TC}$ steuert, wie stark Transaktionskosten im Reward gewichtet werden. Dadurch wird der Agent für Rendite belohnt und gleichzeitig von häufigem oder unnötigem Trading abgehalten.
 
