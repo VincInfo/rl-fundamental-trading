@@ -36,7 +36,10 @@ To keep our code clean, avoid merge conflicts, and make tracking our work easy, 
 ## 4. Pull Requests (PRs)
 
 - **Link the Issue:** Explicitly link the PR to the relevant issue so it automatically closes when merged (see [GitHub Docs: Linking a pull request to an issue](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue)):
-  - Use closing keywords in the PR description: `Closes #12`, `Fixes #45`, or `Resolves #78` (_see doc above for more keywords_)
+  - Use closing keywords in the PR description: `Closes #12`, `Fixes #45`, or `Resolves #78` (_see doc above for more keywords_), e.g.:
+
+    <img width="855" height="227" alt="image" src="https://github.com/user-attachments/assets/44477437-dce6-4802-b506-fde64421c841" />
+    
   - Alternatively, link it manually in the right sidebar under _**Development**_.
 
 - **Quick Summary:** Add 1–2 sentences explaining what was changed.
