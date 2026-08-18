@@ -42,6 +42,7 @@ To keep our code clean, avoid merge conflicts, and make tracking our work easy, 
     
   - Alternatively, link it manually in the right sidebar under _**Development**_.
 
-- **Quick Summary:** Add 1–2 sentences explaining what was changed.
+- **Quick Summary (Optional):** Add 1–2 sentences explaining what was changed.
+- **Notes (Optional):** Mention anything helpful for the reviewer.
 - **Review:** Request **at least one code review** from a teammate before merging.
 - **Merge Strategy:** Prefer **Squash and Merge** to keep the commit history clean and merge into `main` once approved.
