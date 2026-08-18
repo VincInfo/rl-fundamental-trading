@@ -1,0 +1,23 @@
+{
+  "ppo_agent": {
+    "mean_episode_return": 0.0033410764960425388,
+    "median_episode_return": 0.05645063352714086,
+    "mean_episode_reward_sum": -0.006403650663669077,
+    "mean_trade_count": 14.0,
+    "mean_max_drawdown": -0.1565548662812592
+  },
+  "buy_and_hold": {
+    "mean_episode_return": 0.0632599956707421,
+    "median_episode_return": 0.03368550932568137,
+    "mean_episode_reward_sum": 0.03749305081312658,
+    "mean_trade_count": 1.0,
+    "mean_max_drawdown": -0.19964970018816489
+  },
+  "cash": {
+    "mean_episode_return": 0.0,
+    "median_episode_return": 0.0,
+    "mean_episode_reward_sum": 0.0,
+    "mean_trade_count": 0.0,
+    "mean_max_drawdown": 0.0
+  }
+}

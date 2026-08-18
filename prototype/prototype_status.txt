@@ -1,0 +1,105 @@
+Prototyp-Status: RL fuer Aktienhandel mit Fundamentaldaten
+
+Stand: 2026-08-13
+
+1) Ziel des Prototyps
+
+Prototyp soll zeigen, dass RL-Agent mit fundamentalen und ereignisbasierten Informationen trainiert werden kann, ohne Look-Ahead-Bias. 
+Dient als technische und methodische Basis für die spätere rößere Implementierung mit echten Datenquellen.
+
+Kernziele:
+- End-to-End Pipeline lauffähig machen (Daten -> Features -> Environment -> Training -> Evaluation)
+- Echte Datenlogik antizipieren (period_end vs report_date, Filing-Lag)
+- Agentenleistung gegen einfache Baselines vergleichbar machen
+
+2) Architektur
+
+A) Datenebene
+- Generator: src/data/make_mock_data.py
+- Entry-Point: data.py
+- Outputs:
+  - mock_data/prices.csv
+  - mock_data/fundamentals_quarterly.csv
+  - mock_data/features_daily.csv
+
+B) Environment
+- Datei: src/env/trading_env.py
+- Actions: Buy/Hold/Sell
+- Portfolio-Modell: Long-only, Cash + Shares
+- Reward: log-Return des Portfolios pro Schritt
+
+C) Training + Evaluation
+- Datei: src/train/train_ppo.py
+- Algorithmus: PPO (Stable Baselines3)
+- Observation-Normalisierung: VecNormalize
+- Evaluation gegen Benchmarks:
+  - buy_and_hold
+  - cash
+- Artefakte:
+  - artifacts/ppo_fundamental/ppo_fundamental_trading.zip
+  - artifacts/ppo_fundamental/vecnormalize.pkl
+  - artifacts/ppo_fundamental/evaluation_metrics.json
+  - artifacts/ppo_fundamental/equity_curve.csv
+  - artifacts/ppo_fundamental/strategy_comparison.csv
+  - artifacts/ppo_fundamental/benchmark_curves.csv
+
+3) Wichtige Mechanismen im Prototyp
+
+1. As-of Join gegen report_date
+Nur bereits veröffentlichte Fundamentals sind für den Agenten sichtbar.
+
+2. Trennung period_end und report_date
+Die zeitliche Struktur realer Finanzdaten ist modelliert.
+
+3. Event-Mechanik
+Features wie is_report_day und days_since_report sind enthalten.
+
+4. Overtrading-Bremse
+- min_holding_days: Mindesthaltedauer vor Verkauf
+- trade_penalty_bps: zusätzliche Penalty pro ausgeführtem Trade
+
+5. Baseline-Vergleich
+Agent wird nicht isoliert betrachtet, sondern gegen einfache Strategien eingeordnet.
+
+4) Aktuelle Ergebnisse (letzter größerer Run)
+
+Run-Parameter:
+- timesteps: 20000
+- min_holding_days: 3
+- trade_penalty_bps: 2
+
+Kennzahlen:
+- PPO Agent:
+  - mean_episode_return: 0.003341
+  - median_episode_return: 0.056451
+  - mean_episode_reward_sum: -0.006404
+  - mean_trade_count: 14.0
+  - mean_max_drawdown: -0.156555
+
+- Buy-and-Hold:
+  - mean_episode_return: 0.063260
+  - mean_episode_reward_sum: 0.037493
+  - mean_trade_count: 1.0
+  - mean_max_drawdown: -0.199650
+
+- Cash:
+  - mean_episode_return: 0.000000
+
+Interpretation kurz:
+- Agent ist lauffähig und handelt kontrollierter als in vorherigen Runs
+- Gegen Buy-and-Hold ist die Rendite aktuell noch schwacher.
+- Beim Drawdown ist der PPO-Agent in diesem Run besser als Buy-and-Hold
+
+5) Was als nächstes sinnvoll ist
+
+1. Multi-Seed und Walk-Forward Evaluation
+Ergebnisse robust machen statt auf Einzelrun zu vertrauen
+
+2. Hyperparameter-Tuning in kleinem Rahmen
+Lernrate, n_steps, Entropy, Kostengewichte
+
+3. Ablation-Tests
+Nur Preis vs Preis+Fundamental vs Preis+Fundamental+Event
+
+4. Echte Datenpipeline anschliessen
+yfinance + EDGAR-Extraktion auf dieselbe Spaltenlogik mappen

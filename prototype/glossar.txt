@@ -1,0 +1,60 @@
+Glossar: Fachliche Begriffe für den Prototyp RL-Fundamental-Trading
+
+1) FundamentalTradingEnv
+Die konkrete Handelsumgebung im Prototyp (src/env/trading_env.py), in der Agent pro Tag Aktionen ausführt + ein Portfolio fürt.
+
+2) Aktionsraum (Buy/Hold/Sell)
+Im Prototyp sind drei Aktionen implementiert:
+- 0 = Hold
+- 1 = Buy (voll investieren)
+- 2 = Sell (voll liquidieren)
+
+3) Reward im Prototyp
+Der Reward ist logarithmische Portfolioveränderung pro Schritt und enthält Handelskosten plus optionale Trade-Penalty.
+
+4) period_end
+Wirtschaftliches Quartalsende eines Berichtszeitraums -> Dieser Zeitpunkt ist nicht gleichbedeutend mit dem Zeitpunkt, zu dem der Markt die Daten kennt.
+
+5) report_date
+Veröffentlichungsdatum der Kennzahlen. Ab diesem Tag dürfen Fundamentaldaten über den as-of Join in den Zustand einfliessen.
+
+6) filing_lag_days
+Zeitdifferenz zwischen period_end und report_date. Modelliert den realen Verzug zwischen Berichtsperiode und Publikation.
+
+7) As-of Join
+Join-Logik in features_daily.csv, bei der pro Handelstag nur die zuletzt veröffentlichten Fundamentals verwendet werden.
+
+8) Look-Ahead Bias
+Fehlerfall, bei dem Daten vor report_date genutzt werden. Der Prototyp vermeidet das über report_date-basierte Feature-Erzeugung.
+
+9) Event-Features
+Berichtstagsbezogene Merkmale im Prototyp, vor allem:
+- is_report_day
+- days_since_report
+- has_fundamentals
+
+10) EPS Estimate / Actual / Surprise / Surprise Pct
+Earnings-bezogene Variablen fuer Eventeffekte:
+- eps_estimate: Markterwartung
+- eps_actual: veroeffentlichter Wert
+- eps_surprise: Abweichung absolut
+- eps_surprise_pct: Abweichung relativ
+
+11) Overtrading-Bremse
+Mechanismus zur Begrenzung haeufiger Trades:
+- min_holding_days: Mindesthaltedauer vor Verkauf
+- trade_penalty_bps: Zusatzstrafe pro ausgefuehrtem Kauf/Verkauf
+
+12) VecNormalize
+Normalisierungs-Wrapper für Observations auf Trainingsbasis. Verbessert Stabilität beim PPO-Training und wird als vecnormalize.pkl gespeichert.
+
+13) Benchmark-Strategien
+Vergleichsstrategien zur Einordnung des Agenten:
+- buy_and_hold
+- cash
+
+14) Equity Curve
+Zeitreihe des Portfoliowerts; wird für PPO und Benchmarks gespeichert und für Risikoanalysen genutzt.
+
+15) Max Drawdown
+Größter prozentualer Rückgang vom bisherigen Hochpunkt einer Equity Curve. Zentrale Risikokennzahl in evaluation_metrics.json.
