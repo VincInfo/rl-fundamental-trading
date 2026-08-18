@@ -1,0 +1,17 @@
+# Local environment variables
+.env
+.env.*
+!.env.example
+
+# Python virtual env
+.venv/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# Generated outputs
+artifacts/
+
+# Notebook cache
+.ipynb_checkpoints/
