@@ -40,8 +40,6 @@ To keep our code clean, avoid merge conflicts, and make tracking our work easy, 
 
     <img width="855" height="227" alt="image" src="https://github.com/user-attachments/assets/44477437-dce6-4802-b506-fde64421c841" />
     
-  - Alternatively, link it manually in the right sidebar under _**Development**_.
-
 - **Quick Summary (Optional):** Add 1–2 sentences explaining what was changed.
 - **Notes (Optional):** Mention anything helpful for the reviewer.
 - **Review:** Request **at least one code review** from a teammate before merging.
