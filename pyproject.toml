@@ -1,0 +1,10 @@
+[project]
+name = "rl-fundamental-trading"
+version = "0.1.0"
+description = "RL fundamental trading project"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = []
+
+[tool.uv]
+package = false

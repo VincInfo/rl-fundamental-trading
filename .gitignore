@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+
+# Notebook / analysis artifacts
+.ipynb_checkpoints/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+.vscode/
