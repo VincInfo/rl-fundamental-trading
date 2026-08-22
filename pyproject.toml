@@ -3,8 +3,13 @@ name = "rl-fundamental-trading"
 version = "0.1.0"
 description = "RL fundamental trading project"
 readme = "README.md"
-requires-python = ">=3.11,<3.12"
-dependencies = []
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "rl-ss26-market-data-pipeline",
+]
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+rl-ss26-market-data-pipeline = { git = "https://gitlab.lrz.de/daniel.maier/rl-ss26-market-data-pipeline.git", rev = "037226163278cceab8a8fc460217104e7fba7863" }
