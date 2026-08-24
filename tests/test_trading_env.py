@@ -1,18 +1,26 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 from stable_baselines3.common.env_checker import check_env
 
-from models.alpha_model.base import RandomAlphaModel
 from models.data.panel import build_panel
 from models.data.synthetic import make_synthetic_features
 from models.env.trading_env import MultiStockTradingEnv
 
 
+def _random_alpha_wide(features: pd.DataFrame, seed: int) -> pd.DataFrame:
+    # Environment-Tests laufen bewusst ohne XGBoost; getestet wird der Datenkontrakt.
+    dates = np.sort(features["date"].unique())
+    symbols = sorted(str(symbol) for symbol in features["symbol"].unique())
+    scores = np.random.default_rng(seed).normal(0.0, 0.02, size=(len(dates), len(symbols)))
+    return pd.DataFrame(scores, index=pd.Index(dates, name="date"), columns=symbols)
+
+
 def _make_env(n_stocks: int = 4, n_days: int = 200, seed: int = 7) -> MultiStockTradingEnv:
     features = make_synthetic_features(n_stocks=n_stocks, n_days=n_days, seed=seed)
-    alpha = RandomAlphaModel(seed=seed).predict(features)
-    panel = build_panel(features, alpha, vol_window=20)
+    alpha_wide = _random_alpha_wide(features, seed=seed)
+    panel = build_panel(features, alpha_wide, vol_window=20)
     return MultiStockTradingEnv(panel, min_holding_days=3)
 
 
