@@ -12,4 +12,4 @@ dependencies = [
 package = false
 
 [tool.uv.sources]
-rl-ss26-market-data-pipeline = { git = "https://gitlab.lrz.de/daniel.maier/rl-ss26-market-data-pipeline.git", rev = "037226163278cceab8a8fc460217104e7fba7863" }
+rl-ss26-market-data-pipeline = { git = "https://gitlab.lrz.de/daniel.maier/rl-ss26-market-data-pipeline.git", rev = "30d1109e7b978d6793bdb29ee458c4ce474b5230" }
