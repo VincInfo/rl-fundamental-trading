@@ -328,12 +328,12 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "rl-ss26-market-data-pipeline", git = "https://gitlab.lrz.de/daniel.maier/rl-ss26-market-data-pipeline.git?rev=784f64f8bd639583dd05cd8b4946c11953dc0cfc" }]
+requires-dist = [{ name = "rl-ss26-market-data-pipeline", git = "https://gitlab.lrz.de/daniel.maier/rl-ss26-market-data-pipeline.git?rev=cee324de7b80e1e6e0c5531d1a19db0c6ca0f13d" }]
 
 [[package]]
 name = "rl-ss26-market-data-pipeline"
 version = "0.1.0"
-source = { git = "https://gitlab.lrz.de/daniel.maier/rl-ss26-market-data-pipeline.git?rev=784f64f8bd639583dd05cd8b4946c11953dc0cfc#784f64f8bd639583dd05cd8b4946c11953dc0cfc" }
+source = { git = "https://gitlab.lrz.de/daniel.maier/rl-ss26-market-data-pipeline.git?rev=cee324de7b80e1e6e0c5531d1a19db0c6ca0f13d#cee324de7b80e1e6e0c5531d1a19db0c6ca0f13d" }
 dependencies = [
     { name = "numpy" },
     { name = "pandas" },
