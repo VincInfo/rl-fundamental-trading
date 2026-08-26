@@ -13,3 +13,8 @@ package = false
 
 [tool.uv.sources]
 rl-ss26-market-data-pipeline = { git = "https://gitlab.lrz.de/daniel.maier/rl-ss26-market-data-pipeline.git", rev = "cee324de7b80e1e6e0c5531d1a19db0c6ca0f13d" }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
