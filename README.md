@@ -1,5 +1,21 @@
 # rl-fundamental-trading
 
+## Setup (uv)
+
+1. `uv` installieren (falls noch nicht vorhanden):
+	- Linux/macOS: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+2. Python-Version aus `.python-version` bereitstellen:
+	- `uv python install`
+3. Virtuelle Umgebung und Abhängigkeiten erstellen:
+	- `uv sync`
+4. Env-Datei lokal anlegen:
+	- `cp .env.example .env`
+
+Danach können Python-Befehle reproduzierbar über `uv` gestartet werden, z. B.:
+
+- `uv run python --version`
+- `uv run pytest`
+
 ## Gemeinsame Data Pipeline
 
 Marktdaten, technische Indikatoren und SEC-Fundamentaldaten werden durch die
@@ -29,22 +45,6 @@ Die Fundamentals-Pipeline kann in diesem Repository so ausgeführt werden:
 ```bash
 uv run python pipeline/run_fundamentals_pipeline.py
 ```
-
-## Setup (uv)
-
-1. `uv` installieren (falls noch nicht vorhanden):
-	- Linux/macOS: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-2. Python-Version aus `.python-version` bereitstellen:
-	- `uv python install`
-3. Virtuelle Umgebung und Abhängigkeiten erstellen:
-	- `uv sync`
-4. Env-Datei lokal anlegen:
-	- `cp .env.example .env`
-
-Danach können Python-Befehle reproduzierbar über `uv` gestartet werden, z. B.:
-
-- `uv run python --version`
-- `uv run pytest`
 
 ## Workflow mit uv
 
