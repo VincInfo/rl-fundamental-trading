@@ -12,4 +12,9 @@ dependencies = [
 package = false
 
 [tool.uv.sources]
-rl-ss26-market-data-pipeline = { git = "https://gitlab.lrz.de/daniel.maier/rl-ss26-market-data-pipeline.git", rev = "037226163278cceab8a8fc460217104e7fba7863" }
+rl-ss26-market-data-pipeline = { git = "https://gitlab.lrz.de/daniel.maier/rl-ss26-market-data-pipeline.git", rev = "dd253cc5e2ea67c75bdfdc2945d5e1cd73fcfe57" }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

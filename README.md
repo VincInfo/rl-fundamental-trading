@@ -16,6 +16,36 @@ Danach können Python-Befehle reproduzierbar über `uv` gestartet werden, z. B.:
 - `uv run python --version`
 - `uv run pytest`
 
+## Gemeinsame Data Pipeline
+
+Marktdaten, technische Indikatoren und SEC-Fundamentaldaten werden durch die
+auf einen Commit festgelegte Abhängigkeit
+[`rl-ss26-market-data-pipeline`](https://gitlab.lrz.de/daniel.maier/rl-ss26-market-data-pipeline) bereitgestellt. Die mitgelieferte Konfiguration des gemeinsamen Pakets aktiviert Indikatoren und Fundamentaldaten standardmäßig und enthält synchronisierte Rohdaten-Snapshots für die 20 konfigurierten Unternehmen.
+
+Die aktuelle Auswahl der Unternehmen ist:
+
+```text
+Tech and semiconductors: AAPL, MSFT, NVDA, IBM, CSCO, TXN, AMAT, CRM, MU, LRCX
+Consumer discretionary: TSLA, LOW, TGT
+Consumer staples: PEP, COST, MDLZ
+Health care: JNJ, LLY, ISRG
+Industrials: ADP
+```
+
+Wenn das gemeinsame Repository einen neuen Commit veröffentlicht, kann dieses Repository mit folgendem Befehl aktualisiert werden:
+
+```bash
+uv add "rl-ss26-market-data-pipeline @ git+https://gitlab.lrz.de/daniel.maier/rl-ss26-market-data-pipeline.git@<commit-hash>"
+
+uv sync --locked
+```
+
+Die Fundamentals-Pipeline kann in diesem Repository so ausgeführt werden:
+
+```bash
+uv run python pipeline/run_fundamentals_pipeline.py
+```
+
 ## Workflow mit uv
 
 1. Neue Abhängigkeit hinzufügen:
