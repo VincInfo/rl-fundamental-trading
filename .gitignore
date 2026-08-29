@@ -27,3 +27,11 @@ dist/
 # OS / editor
 .DS_Store
 .vscode/
+
+# Trained model artifacts
+models/alpha/artifacts/*
+!models/alpha/artifacts/.gitkeep
+
+# Notebook cache (pickled pipeline output)
+**/.cache/
+notebooks/.cache/
