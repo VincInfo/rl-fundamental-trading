@@ -4,9 +4,9 @@ import numpy as np
 import pandas as pd
 from stable_baselines3.common.env_checker import check_env
 
-from models.data.panel import build_panel
-from models.data.synthetic import make_synthetic_features
-from models.env.trading_env import MultiStockTradingEnv
+from models.ppo.panel import build_panel
+from models.ppo.synthetic import make_synthetic_features
+from models.ppo.trading_env import MultiStockTradingEnv
 
 
 def _random_alpha_wide(features: pd.DataFrame, seed: int) -> pd.DataFrame:

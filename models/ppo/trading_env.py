@@ -6,7 +6,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
-from models.data.panel import MarketPanel
+from models.ppo.panel import MarketPanel
 
 SELL, HOLD, BUY = 0, 1, 2
 # Bildet die diskreten Aktionen auf Handelsrichtungen {-1, 0, +1} ab.

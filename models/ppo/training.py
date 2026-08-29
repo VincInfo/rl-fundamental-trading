@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import argparse
-
 import numpy as np
 import pandas as pd
 
-from models.data.panel import build_panel
-from models.data.synthetic import make_synthetic_features
-from models.env.trading_env import MultiStockTradingEnv
+from models.ppo.config import EnvConfig, TrainingConfig
+from models.ppo.panel import build_panel
+from models.ppo.synthetic import make_synthetic_features
+from models.ppo.trading_env import MultiStockTradingEnv
 
 try:
     from stable_baselines3 import PPO
@@ -55,11 +54,19 @@ def _placeholder_alpha_wide(features: pd.DataFrame, seed: int) -> pd.DataFrame:
 def build_env(
     features: pd.DataFrame,
     alpha_wide: pd.DataFrame,
-    vol_window: int,
-    min_holding_days: int,
+    env_config: EnvConfig,
 ) -> MultiStockTradingEnv:
-    panel = build_panel(features, alpha_wide, vol_window=vol_window)
-    return MultiStockTradingEnv(panel, min_holding_days=min_holding_days)
+    panel = build_panel(features, alpha_wide, vol_window=env_config.vol_window)
+    return MultiStockTradingEnv(
+        panel,
+        initial_cash=env_config.initial_cash,
+        transaction_cost_bps=env_config.transaction_cost_bps,
+        trade_penalty_bps=env_config.trade_penalty_bps,
+        min_holding_days=env_config.min_holding_days,
+        w_max=env_config.w_max,
+        rebalance_budget=env_config.rebalance_budget,
+        eps=env_config.eps,
+    )
 
 
 def rollout_mean_reward(model: PPO, env: VecNormalize) -> float:
@@ -76,43 +83,46 @@ def rollout_mean_reward(model: PPO, env: VecNormalize) -> float:
     return float(np.mean(rewards)) if rewards else 0.0
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="PPO-Training auf der Multi-Stock-Trading-Umgebung.")
-    parser.add_argument("--timesteps", type=int, default=20_000)
-    parser.add_argument("--n-stocks", type=int, default=5)
-    parser.add_argument("--n-days", type=int, default=750)
-    parser.add_argument("--vol-window", type=int, default=20)
-    parser.add_argument("--min-holding-days", type=int, default=3)
-    parser.add_argument(
-        "--alpha-scores",
-        type=str,
-        default=None,
-        help="Pfad zu vorberechneten Alpha-Scores (Wide-Format). Ohne Angabe wird ein Zufalls-Platzhalter verwendet.",
+def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
+    """End-to-end PPO training on synthetic (or provided) features and alpha scores."""
+    config = training_config or TrainingConfig()
+
+    features = make_synthetic_features(
+        n_stocks=config.n_stocks,
+        n_days=config.n_days,
+        seed=config.seed,
     )
-    parser.add_argument("--seed", type=int, default=42)
-    args = parser.parse_args()
+    train_features, _ = split_by_time(features, train_ratio=config.train_ratio)
 
-    features = make_synthetic_features(n_stocks=args.n_stocks, n_days=args.n_days, seed=args.seed)
-    train_features, _ = split_by_time(features)
-
-    if args.alpha_scores is None:
-        alpha_wide = _placeholder_alpha_wide(train_features, seed=args.seed)
+    if config.alpha_scores_path is None:
+        alpha_wide = _placeholder_alpha_wide(train_features, seed=config.seed)
     else:
-        alpha_wide = load_alpha_wide(args.alpha_scores)
+        alpha_wide = load_alpha_wide(config.alpha_scores_path)
 
-    check_env(build_env(train_features, alpha_wide, args.vol_window, args.min_holding_days))
+    check_env(build_env(train_features, alpha_wide, config.env))
 
     def _factory() -> MultiStockTradingEnv:
-        return build_env(train_features, alpha_wide, args.vol_window, args.min_holding_days)
+        return build_env(train_features, alpha_wide, config.env)
 
     env = VecNormalize(DummyVecEnv([_factory]), norm_obs=True, norm_reward=True)
 
-    ppo = PPO("MlpPolicy", env, seed=args.seed, verbose=1)
-    ppo.learn(total_timesteps=args.timesteps)
+    ppo = PPO("MlpPolicy", env, seed=config.seed, verbose=1)
+    ppo.learn(total_timesteps=config.timesteps)
 
     env.training = False
     env.norm_reward = False
-    print(f"Mittlerer Reward (deterministische Episode): {rollout_mean_reward(ppo, env):.6f}")
+    mean_reward = rollout_mean_reward(ppo, env)
+    print(f"Mittlerer Reward (deterministische Episode): {mean_reward:.6f}")
+
+    config.artifact_dir.mkdir(parents=True, exist_ok=True)
+    ppo.save(str(config.artifact_dir / "ppo_agent"))
+    print(f"model saved to {config.artifact_dir / 'ppo_agent'}")
+
+    return ppo
+
+
+def main() -> None:
+    train_ppo_model()
 
 
 if __name__ == "__main__":

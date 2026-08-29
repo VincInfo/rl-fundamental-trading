@@ -31,6 +31,8 @@ dist/
 # Trained model artifacts
 models/alpha/artifacts/*
 !models/alpha/artifacts/.gitkeep
+models/ppo/artifacts/*
+!models/ppo/artifacts/.gitkeep
 
 # Notebook cache (pickled pipeline output)
 **/.cache/
