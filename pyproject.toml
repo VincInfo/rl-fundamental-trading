@@ -6,6 +6,8 @@ readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "rl-ss26-market-data-pipeline",
+    "scikit-learn>=1.9.0",
+    "xgboost>=3.2.0",
 ]
 
 [tool.uv]
