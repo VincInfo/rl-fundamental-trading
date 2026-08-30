@@ -1,12 +1,19 @@
 from __future__ import annotations
 
-import numpy as np
+import json
+from pathlib import Path
+
 import pandas as pd
 from data_pipeline import DataSplit
 
 from models.alpha.features import load_splits
-from models.alpha.scoring import score_wide_frame
+from models.alpha.scoring import load_trained_alpha_model, predict_alpha_wide
 from models.ppo.config import EnvConfig, TrainingConfig
+from models.ppo.evaluation import (
+    episode_length,
+    equal_weight_mean_log_return,
+    rollout_diagnostics,
+)
 from models.ppo.features import build_market_features
 from models.ppo.panel import build_panel
 from models.ppo.trading_env import MultiStockTradingEnv
@@ -47,62 +54,146 @@ def build_env(
     )
 
 
-def rollout_mean_reward(model: PPO, env: VecNormalize) -> float:
-    """Führt eine deterministische Episode aus und gibt den mittleren Reward zurück."""
+def _make_vec_env(
+    features: pd.DataFrame,
+    alpha_wide: pd.DataFrame,
+    env_config: EnvConfig,
+    *,
+    training: bool,
+) -> VecNormalize:
+    def _factory() -> MultiStockTradingEnv:
+        return build_env(features, alpha_wide, env_config)
 
-    obs = env.reset()
-    rewards: list[float] = []
-    done = False
-    while not done:
-        action, _ = model.predict(obs, deterministic=True)
-        obs, reward, dones, _ = env.step(action)
-        rewards.append(float(reward[0]))
-        done = bool(dones[0])
-    return float(np.mean(rewards)) if rewards else 0.0
+    return VecNormalize(
+        DummyVecEnv([_factory]),
+        training=training,
+        norm_obs=True,
+        norm_reward=training,
+    )
 
 
-def _resolve_alpha_scores(
-    train_wide: pd.DataFrame,
-    config: TrainingConfig,
-) -> pd.DataFrame:
-    if config.alpha_scores_path is not None:
-        return load_alpha_wide(config.alpha_scores_path)
-    return score_wide_frame(train_wide, config.alpha_model_dir)
+def _print_split_diagnostics(label: str, metrics: dict[str, float]) -> None:
+    print(
+        f"{label}: mean_reward={metrics['mean_reward']:.6f}  "
+        f"entropy={metrics['mean_entropy']:.2f}/{metrics['max_entropy']:.2f}  "
+        f"buy={metrics['action_share_buy']:.2f}  "
+        f"hold={metrics['action_share_hold']:.2f}  "
+        f"sell={metrics['action_share_sell']:.2f}"
+    )
+
+
+def _save_metrics(metrics: dict) -> None:
+    eval_dir = Path("eval")
+    eval_dir.mkdir(parents=True, exist_ok=True)
+    metrics_path = eval_dir / "ppo_training_metrics.json"
+    with metrics_path.open("w", encoding="utf-8") as metrics_file:
+        json.dump(metrics, metrics_file, indent=2)
+    print(f"metrics saved to {metrics_path}")
 
 
 def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
     """End-to-end PPO training on pipeline market data and trained alpha scores."""
     config = training_config or TrainingConfig()
+    splits = load_splits()
 
-    train_wide = load_splits()[DataSplit.TRAIN]
+    train_wide = splits[DataSplit.TRAIN]
+    validation_wide = splits[DataSplit.VALIDATION]
     train_features = build_market_features(train_wide)
+    validation_features = build_market_features(validation_wide)
+
+    alpha_model = load_trained_alpha_model(config.alpha_model_dir)
+    if config.alpha_scores_path is None:
+        train_alpha = predict_alpha_wide(alpha_model, train_wide)
+    else:
+        train_alpha = load_alpha_wide(config.alpha_scores_path)
+    validation_alpha = predict_alpha_wide(alpha_model, validation_wide)
+
+    train_days = int(train_features["date"].nunique())
+    validation_days = int(validation_features["date"].nunique())
+    n_stocks = int(train_features["symbol"].nunique())
+    steps_per_episode = episode_length(train_days)
+    data_passes = (
+        config.timesteps / steps_per_episode if steps_per_episode else float("inf")
+    )
     print(
-        "train days: "
-        f"{train_features['date'].nunique()}  "
-        f"stocks: {train_features['symbol'].nunique()}"
+        f"train days: {train_days}  val days: {validation_days}  stocks: {n_stocks}"
+    )
+    print(
+        f"alpha scores train: {train_alpha.shape[0]} days x {train_alpha.shape[1]} stocks  "
+        f"val: {validation_alpha.shape[0]} days x {validation_alpha.shape[1]} stocks"
+    )
+    print(
+        f"timesteps: {config.timesteps}  "
+        f"episode length: {steps_per_episode}  "
+        f"~{data_passes:.0f} passes over the train window"
     )
 
-    alpha_wide = _resolve_alpha_scores(train_wide, config)
-    print(f"alpha scores: {alpha_wide.shape[0]} days x {alpha_wide.shape[1]} stocks")
+    check_env(build_env(train_features, train_alpha, config.env))
+    env = _make_vec_env(train_features, train_alpha, config.env, training=True)
 
-    check_env(build_env(train_features, alpha_wide, config.env))
-
-    def _factory() -> MultiStockTradingEnv:
-        return build_env(train_features, alpha_wide, config.env)
-
-    env = VecNormalize(DummyVecEnv([_factory]), norm_obs=True, norm_reward=True)
-
-    ppo = PPO("MlpPolicy", env, seed=config.seed, verbose=1)
+    ppo = PPO(
+        "MlpPolicy",
+        env,
+        seed=config.seed,
+        verbose=1,
+        n_steps=config.ppo.n_steps,
+        batch_size=config.ppo.batch_size,
+        n_epochs=config.ppo.n_epochs,
+        clip_range=config.ppo.clip_range,
+        ent_coef=config.ppo.ent_coef,
+        learning_rate=config.ppo.learning_rate,
+        gamma=config.ppo.gamma,
+        gae_lambda=config.ppo.gae_lambda,
+        max_grad_norm=config.ppo.max_grad_norm,
+    )
     ppo.learn(total_timesteps=config.timesteps)
 
     env.training = False
     env.norm_reward = False
-    mean_reward = rollout_mean_reward(ppo, env)
-    print(f"Mittlerer Reward (deterministische Episode): {mean_reward:.6f}")
 
     config.artifact_dir.mkdir(parents=True, exist_ok=True)
+    vecnormalize_path = config.artifact_dir / "vecnormalize.pkl"
+    env.save(str(vecnormalize_path))
     ppo.save(str(config.artifact_dir / "ppo_agent"))
     print(f"model saved to {config.artifact_dir / 'ppo_agent'}")
+    print(f"vecnormalize saved to {vecnormalize_path}")
+
+    train_metrics = rollout_diagnostics(ppo, env)
+    _print_split_diagnostics("train", train_metrics)
+
+    validation_env = _make_vec_env(
+        validation_features,
+        validation_alpha,
+        config.env,
+        training=False,
+    )
+    validation_env.obs_rms = env.obs_rms
+    validation_metrics = rollout_diagnostics(ppo, validation_env)
+    _print_split_diagnostics("val", validation_metrics)
+
+    validation_panel = build_panel(
+        validation_features,
+        validation_alpha,
+        vol_window=config.env.vol_window,
+    )
+    equal_weight = equal_weight_mean_log_return(validation_panel)
+    print(f"val equal-weight mean log return: {equal_weight:.6f}")
+
+    _save_metrics(
+        {
+            "timesteps": config.timesteps,
+            "train_days": train_days,
+            "val_days": validation_days,
+            "n_stocks": n_stocks,
+            "steps_per_episode": steps_per_episode,
+            "train_window_passes": data_passes,
+            "clip_range": config.ppo.clip_range,
+            "n_epochs": config.ppo.n_epochs,
+            "train": train_metrics,
+            "validation": validation_metrics,
+            "validation_equal_weight_mean_log_return": equal_weight,
+        }
+    )
 
     return ppo
 

@@ -20,10 +20,24 @@ class EnvConfig:
 
 
 @dataclass
+class PpoConfig:
+    n_steps: int = 2048
+    batch_size: int = 256
+    n_epochs: int = 4
+    clip_range: float = 0.1
+    ent_coef: float = 0.0
+    learning_rate: float = 3e-4
+    gamma: float = 0.99
+    gae_lambda: float = 0.95
+    max_grad_norm: float = 0.5
+
+
+@dataclass
 class TrainingConfig:
-    timesteps: int = 20_000
+    timesteps: int = 200_000
     seed: int = 42
     alpha_model_dir: Path = DEFAULT_ALPHA_ARTIFACT_DIR
     alpha_scores_path: str | None = None
     artifact_dir: Path = DEFAULT_ARTIFACT_DIR
     env: EnvConfig = field(default_factory=EnvConfig)
+    ppo: PpoConfig = field(default_factory=PpoConfig)
