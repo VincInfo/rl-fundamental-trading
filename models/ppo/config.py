@@ -20,9 +20,6 @@ class EnvConfig:
 @dataclass
 class TrainingConfig:
     timesteps: int = 20_000
-    n_stocks: int = 5
-    n_days: int = 750
-    train_ratio: float = 0.8
     seed: int = 42
     alpha_scores_path: str | None = None
     artifact_dir: Path = DEFAULT_ARTIFACT_DIR
