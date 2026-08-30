@@ -1,7 +1,7 @@
 import pandas as pd
 
-from models.alpha.config import MODEL_FEATURE_COLUMNS, TrainingConfig
-from models.alpha.features import build_dataset
+from models.alpha.config import MODEL_FEATURE_COLUMNS, TARGET_COLUMN, TrainingConfig
+from models.alpha.features import build_dataset, build_inference_features
 
 
 def _synthetic_wide_frame(rows: int, tickers: list[str]) -> pd.DataFrame:
@@ -42,3 +42,21 @@ def test_build_dataset_produces_model_features_and_target():
     assert list(dataset.columns) == list(MODEL_FEATURE_COLUMNS) + [config.target_column]
     assert not dataset.empty
     assert set(dataset.index.get_level_values("Ticker")) == set(tickers)
+
+
+def test_build_inference_features_keeps_rows_without_target():
+    tickers = ["AAPL", "MSFT"]
+    wide_frame = _synthetic_wide_frame(rows=300, tickers=tickers)
+    config = TrainingConfig(
+        horizon_trading_days=5,
+        bars_per_trading_day=7,
+        sample_daily=True,
+    )
+
+    dataset = build_dataset(wide_frame, config)
+    inference = build_inference_features(wide_frame, config)
+
+    assert list(inference.columns) == list(MODEL_FEATURE_COLUMNS)
+    assert TARGET_COLUMN not in inference.columns
+    assert len(inference) > len(dataset)
+    assert set(inference.index.get_level_values("Ticker")) == set(tickers)

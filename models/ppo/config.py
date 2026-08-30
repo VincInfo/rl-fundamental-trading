@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from models.alpha.config import DEFAULT_ARTIFACT_DIR as DEFAULT_ALPHA_ARTIFACT_DIR
+
 
 DEFAULT_ARTIFACT_DIR = Path("models/ppo/artifacts")
 
@@ -21,6 +23,7 @@ class EnvConfig:
 class TrainingConfig:
     timesteps: int = 20_000
     seed: int = 42
+    alpha_model_dir: Path = DEFAULT_ALPHA_ARTIFACT_DIR
     alpha_scores_path: str | None = None
     artifact_dir: Path = DEFAULT_ARTIFACT_DIR
     env: EnvConfig = field(default_factory=EnvConfig)
