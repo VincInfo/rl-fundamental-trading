@@ -24,7 +24,7 @@ def _synthetic_wide_frame(rows: int, tickers: list[str]) -> pd.DataFrame:
     )
     columns = pd.MultiIndex.from_product(
         [
-            ["Close", "roe", "gross_margin", "debt_to_equity"],
+            ["Close", "roe", "gross_margin", "debt_to_equity", "filing_lag_days"],
             tickers,
         ],
         names=["Feature", "Ticker"],
@@ -35,6 +35,7 @@ def _synthetic_wide_frame(rows: int, tickers: list[str]) -> pd.DataFrame:
         values[("roe", ticker)] = 0.2
         values[("gross_margin", ticker)] = 0.4
         values[("debt_to_equity", ticker)] = 0.5
+        values[("filing_lag_days", ticker)] = 30
     return values
 
 
