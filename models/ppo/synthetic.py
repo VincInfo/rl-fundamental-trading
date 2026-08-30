@@ -12,7 +12,7 @@ def make_synthetic_features(
 ) -> pd.DataFrame:
     """Erzeugt einen ausgerichteten Multi-Stock-Kursdatensatz im Long-Format.
 
-    Dient als Platzhalter, bis die echte Datenpipeline (EDGAR / yfinance) steht.
+    Nur für Env-Unit-Tests; das Training läuft über die gemeinsame Datenpipeline.
     Jede Aktie kombiniert einen gemeinsamen Marktfaktor mit idiosynkratischem
     Rauschen, sodass Korrelationen und titelspezifische Bewegungen entstehen.
     """

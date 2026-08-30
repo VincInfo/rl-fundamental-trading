@@ -13,8 +13,6 @@ from models.ppo.training import train_ppo_model
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train the PPO trading agent.")
     parser.add_argument("--timesteps", type=int, default=20_000)
-    parser.add_argument("--n-stocks", type=int, default=5)
-    parser.add_argument("--n-days", type=int, default=750)
     parser.add_argument("--vol-window", type=int, default=20)
     parser.add_argument("--min-holding-days", type=int, default=3)
     parser.add_argument(
@@ -37,8 +35,6 @@ def main() -> None:
     args = parse_args()
     config = TrainingConfig(
         timesteps=args.timesteps,
-        n_stocks=args.n_stocks,
-        n_days=args.n_days,
         seed=args.seed,
         alpha_scores_path=args.alpha_scores,
         artifact_dir=args.output,

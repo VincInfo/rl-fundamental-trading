@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 
 from models.ppo.config import EnvConfig, TrainingConfig
+from models.ppo.features import load_train_features
 from models.ppo.panel import build_panel
-from models.ppo.synthetic import make_synthetic_features
 from models.ppo.trading_env import MultiStockTradingEnv
 
 try:
@@ -18,23 +18,6 @@ except ImportError as exc:  # pragma: no cover - klare Meldung falls RL-Extra fe
     ) from exc
 
 
-def split_by_time(features: pd.DataFrame, train_ratio: float = 0.8) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Splittet den Datensatz entlang der Zeitachse, um Data Leakage zu vermeiden."""
-
-    if not 0.0 < train_ratio < 1.0:
-        raise ValueError("train_ratio muss zwischen 0 und 1 liegen.")
-
-    unique_dates = np.sort(features["date"].unique())
-    cutoff_index = min(max(1, int(len(unique_dates) * train_ratio)), len(unique_dates) - 1)
-    cutoff_date = unique_dates[cutoff_index - 1]
-
-    train = features[features["date"] <= cutoff_date].reset_index(drop=True)
-    test = features[features["date"] > cutoff_date].reset_index(drop=True)
-    if train.empty or test.empty:
-        raise ValueError("Zeitlicher Split hat eine leere Train- oder Test-Menge erzeugt.")
-    return train, test
-
-
 def load_alpha_wide(path: str) -> pd.DataFrame:
     """Lädt vorberechnete Alpha-Scores (Wide-Format, Index=date, Spalten=symbol)."""
 
@@ -44,7 +27,7 @@ def load_alpha_wide(path: str) -> pd.DataFrame:
 
 
 def _placeholder_alpha_wide(features: pd.DataFrame, seed: int) -> pd.DataFrame:
-    # Platzhalter bis Pipeline + XGBoost-Trainingsjob getrennt Alpha-Scores liefern.
+    # Platzhalter, bis das Alpha-Modell in einem eigenen Issue angebunden wird.
     dates = np.sort(features["date"].unique())
     symbols = sorted(str(symbol) for symbol in features["symbol"].unique())
     scores = np.random.default_rng(seed).normal(0.0, 0.02, size=(len(dates), len(symbols)))
@@ -84,15 +67,15 @@ def rollout_mean_reward(model: PPO, env: VecNormalize) -> float:
 
 
 def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
-    """End-to-end PPO training on synthetic (or provided) features and alpha scores."""
+    """End-to-end PPO training on pipeline market data and placeholder alpha scores."""
     config = training_config or TrainingConfig()
 
-    features = make_synthetic_features(
-        n_stocks=config.n_stocks,
-        n_days=config.n_days,
-        seed=config.seed,
+    train_features = load_train_features()
+    print(
+        "train days: "
+        f"{train_features['date'].nunique()}  "
+        f"stocks: {train_features['symbol'].nunique()}"
     )
-    train_features, _ = split_by_time(features, train_ratio=config.train_ratio)
 
     if config.alpha_scores_path is None:
         alpha_wide = _placeholder_alpha_wide(train_features, seed=config.seed)

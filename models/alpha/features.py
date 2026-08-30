@@ -24,7 +24,7 @@ def load_splits(
     }
 
 
-def _daily_rebalance_mask(index: pd.DatetimeIndex) -> pd.DatetimeIndex:
+def daily_rebalance_mask(index: pd.DatetimeIndex) -> pd.DatetimeIndex:
     """First hourly bar per calendar day (rebalance time)."""
     normalized_dates = index.normalize()
     return index[~normalized_dates.duplicated(keep="first")]
@@ -98,7 +98,7 @@ def build_dataset(
     )
 
     if config.sample_daily:
-        combined_wide = combined_wide.loc[_daily_rebalance_mask(combined_wide.index)]
+        combined_wide = combined_wide.loc[daily_rebalance_mask(combined_wide.index)]
 
     long_frame = combined_wide.stack("Ticker", future_stack=True)
     long_frame.index.names = ["Datetime", "Ticker"]
