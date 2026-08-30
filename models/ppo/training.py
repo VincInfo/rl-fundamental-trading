@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from data_pipeline import DataSplit
 
+from models.alpha.features import load_splits
+from models.alpha.scoring import score_wide_frame
 from models.ppo.config import EnvConfig, TrainingConfig
-from models.ppo.features import load_train_features
+from models.ppo.features import build_market_features
 from models.ppo.panel import build_panel
 from models.ppo.trading_env import MultiStockTradingEnv
 
@@ -24,14 +27,6 @@ def load_alpha_wide(path: str) -> pd.DataFrame:
     if path.endswith(".parquet"):
         return pd.read_parquet(path)
     return pd.read_csv(path, index_col=0, parse_dates=True)
-
-
-def _placeholder_alpha_wide(features: pd.DataFrame, seed: int) -> pd.DataFrame:
-    # Platzhalter, bis das Alpha-Modell in einem eigenen Issue angebunden wird.
-    dates = np.sort(features["date"].unique())
-    symbols = sorted(str(symbol) for symbol in features["symbol"].unique())
-    scores = np.random.default_rng(seed).normal(0.0, 0.02, size=(len(dates), len(symbols)))
-    return pd.DataFrame(scores, index=pd.Index(dates, name="date"), columns=symbols)
 
 
 def build_env(
@@ -66,21 +61,29 @@ def rollout_mean_reward(model: PPO, env: VecNormalize) -> float:
     return float(np.mean(rewards)) if rewards else 0.0
 
 
+def _resolve_alpha_scores(
+    train_wide: pd.DataFrame,
+    config: TrainingConfig,
+) -> pd.DataFrame:
+    if config.alpha_scores_path is not None:
+        return load_alpha_wide(config.alpha_scores_path)
+    return score_wide_frame(train_wide, config.alpha_model_dir)
+
+
 def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
-    """End-to-end PPO training on pipeline market data and placeholder alpha scores."""
+    """End-to-end PPO training on pipeline market data and trained alpha scores."""
     config = training_config or TrainingConfig()
 
-    train_features = load_train_features()
+    train_wide = load_splits()[DataSplit.TRAIN]
+    train_features = build_market_features(train_wide)
     print(
         "train days: "
         f"{train_features['date'].nunique()}  "
         f"stocks: {train_features['symbol'].nunique()}"
     )
 
-    if config.alpha_scores_path is None:
-        alpha_wide = _placeholder_alpha_wide(train_features, seed=config.seed)
-    else:
-        alpha_wide = load_alpha_wide(config.alpha_scores_path)
+    alpha_wide = _resolve_alpha_scores(train_wide, config)
+    print(f"alpha scores: {alpha_wide.shape[0]} days x {alpha_wide.shape[1]} stocks")
 
     check_env(build_env(train_features, alpha_wide, config.env))
 

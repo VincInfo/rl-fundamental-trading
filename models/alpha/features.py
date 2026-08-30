@@ -74,6 +74,48 @@ def _wide_forward_return(close: pd.DataFrame, config: TrainingConfig) -> pd.Data
     return target
 
 
+def _combined_wide_frame(
+    wide_frame: pd.DataFrame,
+    config: TrainingConfig,
+    include_target: bool,
+) -> pd.DataFrame:
+    close = wide_frame["Close"]
+    market_features = _wide_market_features(close, config)
+
+    fundamental_mask = wide_frame.columns.get_level_values("Feature").isin(
+        FUNDAMENTAL_FEATURE_COLUMNS
+    )
+    fundamentals = wide_frame.loc[:, fundamental_mask]
+    frames = [market_features, fundamentals]
+    if include_target:
+        frames.append(_wide_forward_return(close, config))
+
+    combined_wide = pd.concat(frames, axis="columns", sort=False)
+    if config.sample_daily:
+        combined_wide = combined_wide.loc[daily_rebalance_mask(combined_wide.index)]
+    return combined_wide
+
+
+def _to_long_frame(combined_wide: pd.DataFrame) -> pd.DataFrame:
+    long_frame = combined_wide.stack("Ticker", future_stack=True)
+    long_frame.index.names = ["Datetime", "Ticker"]
+    return long_frame
+
+
+def build_inference_features(
+    wide_frame: pd.DataFrame,
+    config: TrainingConfig,
+) -> pd.DataFrame:
+    """Long feature table for scoring, without the supervised target.
+
+    Drops rows only when model inputs are missing, so the last horizon days
+    remain available as PPO state inputs.
+    """
+    long_frame = _to_long_frame(_combined_wide_frame(wide_frame, config, include_target=False))
+    feature_columns = list(MODEL_FEATURE_COLUMNS)
+    return long_frame.dropna(subset=feature_columns)[feature_columns]
+
+
 def build_dataset(
     wide_frame: pd.DataFrame,
     config: TrainingConfig,
@@ -83,30 +125,10 @@ def build_dataset(
 
     One row per (rebalance timestamp, ticker) when sample_daily=True.
     """
-    close = wide_frame["Close"]
-    market_features = _wide_market_features(close, config)
-
-    fundamental_mask = wide_frame.columns.get_level_values("Feature").isin(
-        FUNDAMENTAL_FEATURE_COLUMNS
-    )
-    fundamentals = wide_frame.loc[:, fundamental_mask]
-
-    combined_wide = pd.concat(
-        [market_features, fundamentals, _wide_forward_return(close, config)],
-        axis="columns",
-        sort=False,
-    )
-
-    if config.sample_daily:
-        combined_wide = combined_wide.loc[daily_rebalance_mask(combined_wide.index)]
-
-    long_frame = combined_wide.stack("Ticker", future_stack=True)
-    long_frame.index.names = ["Datetime", "Ticker"]
-
+    long_frame = _to_long_frame(_combined_wide_frame(wide_frame, config, include_target=True))
     feature_columns = list(MODEL_FEATURE_COLUMNS)
     required_columns = feature_columns + [config.target_column]
     long_frame = long_frame.dropna(subset=required_columns)
-
     return long_frame[required_columns]
 
 
