@@ -13,14 +13,30 @@ ENGINEERED_FEATURE_COLUMNS = (
     "vol_20d",
 )
 
-FUNDAMENTAL_FEATURE_COLUMNS = (
+FUNDAMENTAL_LEVEL_COLUMNS = (
     "roe",
     "gross_margin",
     "debt_to_equity",
 )
 
+CONTEXT_FEATURE_COLUMNS = (
+    "filing_lag_days",
+)
+
+CHANGE_FEATURE_COLUMNS = tuple(
+    f"delta_{column}" for column in FUNDAMENTAL_LEVEL_COLUMNS
+)
+
+# Columns copied from the pipeline wide frame (levels + recency).
+FUNDAMENTAL_FEATURE_COLUMNS = FUNDAMENTAL_LEVEL_COLUMNS + CONTEXT_FEATURE_COLUMNS
+
 # All model inputs produced by build_dataset (target_column is the label, not a feature).
-MODEL_FEATURE_COLUMNS = ENGINEERED_FEATURE_COLUMNS + FUNDAMENTAL_FEATURE_COLUMNS
+MODEL_FEATURE_COLUMNS = (
+    ENGINEERED_FEATURE_COLUMNS
+    + FUNDAMENTAL_LEVEL_COLUMNS
+    + CONTEXT_FEATURE_COLUMNS
+    + CHANGE_FEATURE_COLUMNS
+)
 
 
 @dataclass

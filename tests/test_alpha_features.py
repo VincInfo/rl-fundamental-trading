@@ -4,7 +4,12 @@ from models.alpha.config import MODEL_FEATURE_COLUMNS, TARGET_COLUMN, TrainingCo
 from models.alpha.features import build_dataset, build_inference_features
 
 
-def _synthetic_wide_frame(rows: int, tickers: list[str]) -> pd.DataFrame:
+def _synthetic_wide_frame(
+    rows: int,
+    tickers: list[str],
+    *,
+    roe_jump_at: int | None = None,
+) -> pd.DataFrame:
     index = pd.date_range(
         "2024-01-01 09:30",
         periods=rows,
@@ -13,7 +18,7 @@ def _synthetic_wide_frame(rows: int, tickers: list[str]) -> pd.DataFrame:
     )
     columns = pd.MultiIndex.from_product(
         [
-            ["Close", "roe", "gross_margin", "debt_to_equity"],
+            ["Close", "roe", "gross_margin", "debt_to_equity", "filing_lag_days"],
             tickers,
         ],
         names=["Feature", "Ticker"],
@@ -21,25 +26,30 @@ def _synthetic_wide_frame(rows: int, tickers: list[str]) -> pd.DataFrame:
     values = pd.DataFrame(index=index, columns=columns, dtype=float)
     for ticker in tickers:
         values[("Close", ticker)] = 100 + pd.Series(range(rows), index=index) * 0.1
-        values[("roe", ticker)] = 0.2
+        values[("roe", ticker)] = 0.20
         values[("gross_margin", ticker)] = 0.4
         values[("debt_to_equity", ticker)] = 0.5
-
+        values[("filing_lag_days", ticker)] = 40
+        if roe_jump_at is not None:
+            values.loc[index[roe_jump_at]:, ("roe", ticker)] = 0.25
+            values.loc[index[roe_jump_at]:, ("filing_lag_days", ticker)] = 0
     return values
 
 
-def test_build_dataset_produces_model_features_and_target():
-    tickers = ["AAPL", "MSFT"]
-    wide_frame = _synthetic_wide_frame(rows=300, tickers=tickers)
-    config = TrainingConfig(
+def _training_config() -> TrainingConfig:
+    return TrainingConfig(
         horizon_trading_days=5,
         bars_per_trading_day=7,
         sample_daily=True,
     )
 
-    dataset = build_dataset(wide_frame, config)
 
-    assert list(dataset.columns) == list(MODEL_FEATURE_COLUMNS) + [config.target_column]
+def test_build_dataset_produces_model_features_and_target():
+    tickers = ["AAPL", "MSFT"]
+    wide_frame = _synthetic_wide_frame(rows=300, tickers=tickers)
+    dataset = build_dataset(wide_frame, _training_config())
+
+    assert list(dataset.columns) == list(MODEL_FEATURE_COLUMNS) + ["target_return"]
     assert not dataset.empty
     assert set(dataset.index.get_level_values("Ticker")) == set(tickers)
 
@@ -47,11 +57,7 @@ def test_build_dataset_produces_model_features_and_target():
 def test_build_inference_features_keeps_rows_without_target():
     tickers = ["AAPL", "MSFT"]
     wide_frame = _synthetic_wide_frame(rows=300, tickers=tickers)
-    config = TrainingConfig(
-        horizon_trading_days=5,
-        bars_per_trading_day=7,
-        sample_daily=True,
-    )
+    config = _training_config()
 
     dataset = build_dataset(wide_frame, config)
     inference = build_inference_features(wide_frame, config)
@@ -60,3 +66,14 @@ def test_build_inference_features_keeps_rows_without_target():
     assert TARGET_COLUMN not in inference.columns
     assert len(inference) > len(dataset)
     assert set(inference.index.get_level_values("Ticker")) == set(tickers)
+
+
+def test_delta_roe_persists_after_filing_jump():
+    tickers = ["AAPL"]
+    wide_frame = _synthetic_wide_frame(rows=300, tickers=tickers, roe_jump_at=250)
+    dataset = build_dataset(wide_frame, _training_config())
+    delta = dataset.xs("AAPL", level="Ticker")["delta_roe"]
+
+    assert 0.0 in set(delta.round(10))
+    assert any(delta.round(10) == 0.05)
+    assert dataset.xs("AAPL", level="Ticker")["filing_lag_days"].eq(0).any()

@@ -6,6 +6,7 @@ from data_pipeline import DataSplit, DataVariant, get_data
 from models.alpha.config import (
     ENGINEERED_FEATURE_COLUMNS,
     FUNDAMENTAL_FEATURE_COLUMNS,
+    FUNDAMENTAL_LEVEL_COLUMNS,
     MODEL_FEATURE_COLUMNS,
     TARGET_COLUMN,
     TrainingConfig,
@@ -74,6 +75,30 @@ def _wide_forward_return(close: pd.DataFrame, config: TrainingConfig) -> pd.Data
     return target
 
 
+def _last_step_change(values: pd.Series) -> pd.Series:
+    """Propagate the last level jump until the next filing changes the series."""
+    is_new_level = values.ne(values.shift())
+    step = (values - values.shift()).where(is_new_level)
+    return step.ffill().fillna(0.0)
+
+
+def _wide_fundamental_changes(wide_frame: pd.DataFrame) -> pd.DataFrame:
+    available = set(wide_frame.columns.get_level_values("Feature"))
+    missing = [name for name in FUNDAMENTAL_LEVEL_COLUMNS if name not in available]
+    if missing:
+        raise ValueError(f"Missing fundamental level columns: {missing}")
+
+    frames = []
+    for column in FUNDAMENTAL_LEVEL_COLUMNS:
+        changed = wide_frame[column].apply(_last_step_change, axis=0)
+        changed.columns = pd.MultiIndex.from_product(
+            [[f"delta_{column}"], changed.columns],
+            names=["Feature", "Ticker"],
+        )
+        frames.append(changed)
+    return pd.concat(frames, axis="columns", sort=False)
+
+
 def _combined_wide_frame(
     wide_frame: pd.DataFrame,
     config: TrainingConfig,
@@ -86,7 +111,7 @@ def _combined_wide_frame(
         FUNDAMENTAL_FEATURE_COLUMNS
     )
     fundamentals = wide_frame.loc[:, fundamental_mask]
-    frames = [market_features, fundamentals]
+    frames = [market_features, fundamentals, _wide_fundamental_changes(wide_frame)]
     if include_target:
         frames.append(_wide_forward_return(close, config))
 
