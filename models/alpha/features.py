@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import pandas as pd
-from data_pipeline import DataSplit, DataVariant, get_data
+from data_pipeline import DataSplit, DataVariant
+
+from eval.data_splits.loader import load_evaluation_splits
 
 from models.alpha.config import (
     ENGINEERED_FEATURE_COLUMNS,
@@ -17,12 +19,7 @@ def load_splits(
     variant: DataVariant = DataVariant.WITH_FUNDAMENTALS,
 ) -> dict[DataSplit, pd.DataFrame]:
     """Load chronologically split market data from the shared pipeline."""
-    data = get_data(variant)
-    return {
-        DataSplit.TRAIN: data[DataSplit.TRAIN],
-        DataSplit.VALIDATION: data[DataSplit.VALIDATION],
-        DataSplit.TEST: data[DataSplit.TEST],
-    }
+    return load_evaluation_splits(variant)
 
 
 def daily_rebalance_mask(index: pd.DatetimeIndex) -> pd.DatetimeIndex:
