@@ -6,8 +6,16 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from models.alpha.config import DEFAULT_ARTIFACT_DIR as DEFAULT_ALPHA_ARTIFACT_DIR
-from models.ppo.config import DEFAULT_ARTIFACT_DIR, EnvConfig, TrainingConfig
+from models.alpha.config import (
+    DEFAULT_ARTIFACT_DIR as DEFAULT_ALPHA_ARTIFACT_DIR,
+    DEFAULT_MARKET_ARTIFACT_DIR as DEFAULT_ALPHA_MARKET_ARTIFACT_DIR,
+)
+from models.ppo.config import (
+    DEFAULT_ARTIFACT_DIR,
+    DEFAULT_MARKET_ARTIFACT_DIR,
+    EnvConfig,
+    TrainingConfig,
+)
 from models.ppo.training import train_ppo_model
 
 
@@ -22,9 +30,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--vol-window", type=int, default=20)
     parser.add_argument("--min-holding-days", type=int, default=3)
     parser.add_argument(
+        "--no-fundamentals",
+        action="store_true",
+        help=(
+            "Ablation convenience flag: use market-only alpha artifacts "
+            f"({DEFAULT_ALPHA_MARKET_ARTIFACT_DIR}) and write PPO artifacts to "
+            f"{DEFAULT_MARKET_ARTIFACT_DIR}. Overridden by --alpha-model/--output."
+        ),
+    )
+    parser.add_argument(
         "--alpha-model",
         type=Path,
-        default=DEFAULT_ALPHA_ARTIFACT_DIR,
+        default=None,
         help="Directory of the trained XGBoost alpha artifact.",
     )
     parser.add_argument(
@@ -37,7 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=DEFAULT_ARTIFACT_DIR,
+        default=None,
         help="Directory for the trained model artifact.",
     )
     return parser.parse_args()
@@ -45,6 +62,18 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.alpha_model is None:
+        args.alpha_model = (
+            DEFAULT_ALPHA_MARKET_ARTIFACT_DIR
+            if args.no_fundamentals
+            else DEFAULT_ALPHA_ARTIFACT_DIR
+        )
+    if args.output is None:
+        args.output = (
+            DEFAULT_MARKET_ARTIFACT_DIR
+            if args.no_fundamentals
+            else DEFAULT_ARTIFACT_DIR
+        )
     config = TrainingConfig(
         timesteps=args.timesteps,
         seed=args.seed,

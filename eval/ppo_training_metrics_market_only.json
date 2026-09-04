@@ -11,38 +11,38 @@
   "learning_rate": 0.0001,
   "trade_penalty_bps": 10.0,
   "alpha_alignment_bps": 5.0,
-  "alpha_feature_set": "with_fundamentals",
-  "alpha_model_dir": "models\\alpha\\artifacts",
+  "alpha_feature_set": "market_only",
+  "alpha_model_dir": "models\\alpha\\artifacts_market",
   "rule_train": {
-    "mean_reward": 0.004417193450954913,
+    "mean_reward": 0.0032905038086566392,
     "n_steps": 282,
     "action_share_sell": 0.3,
     "action_share_hold": 0.4,
     "action_share_buy": 0.3
   },
   "rule_validation": {
-    "mean_reward": 0.0004132166571153151,
+    "mean_reward": 0.000756947781235213,
     "n_steps": 94,
     "action_share_sell": 0.3,
     "action_share_hold": 0.4,
     "action_share_buy": 0.3
   },
   "train": {
-    "mean_reward": 0.0033064710797389256,
+    "mean_reward": 0.0022398947845005675,
     "n_steps": 282,
-    "action_share_sell": 0.4014184397163121,
-    "action_share_hold": 0.2531914893617021,
-    "action_share_buy": 0.3453900709219858,
-    "mean_entropy": 21.86331378314512,
+    "action_share_sell": 0.35301418439716314,
+    "action_share_hold": 0.3021276595744681,
+    "action_share_buy": 0.3448581560283688,
+    "mean_entropy": 21.944946370226273,
     "max_entropy": 21.972245773362197
   },
   "validation": {
-    "mean_reward": -0.0006543456125035982,
+    "mean_reward": 0.000533408333022306,
     "n_steps": 94,
-    "action_share_sell": 0.42340425531914894,
-    "action_share_hold": 0.249468085106383,
-    "action_share_buy": 0.3271276595744681,
-    "mean_entropy": 21.926601389621165,
+    "action_share_sell": 0.40106382978723404,
+    "action_share_hold": 0.2968085106382979,
+    "action_share_buy": 0.3021276595744681,
+    "mean_entropy": 21.949011701218627,
     "max_entropy": 21.972245773362197
   },
   "validation_equal_weight_mean_log_return": 0.00046562280519583547

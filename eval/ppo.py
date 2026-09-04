@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from models.ppo.panel import MarketPanel
-from models.ppo.trading_env import BUY, HOLD, SELL
+from models.ppo.trading_env import BUY, HOLD, SELL, MultiStockTradingEnv
 
 try:
     from stable_baselines3 import PPO
@@ -43,6 +44,34 @@ def action_shares(actions: np.ndarray) -> dict[str, float]:
         name: float((actions == code).mean())
         for code, name in ACTION_NAMES.items()
     }
+
+
+def alpha_quantile_actions(
+    alpha: np.ndarray,
+    *,
+    buy_fraction: float = 0.3,
+    sell_fraction: float = 0.3,
+) -> np.ndarray:
+    """Buy top-alpha names, sell bottom-alpha names, hold the middle."""
+    alpha = np.asarray(alpha, dtype=np.float64).reshape(-1)
+    n_stocks = alpha.shape[0]
+    if n_stocks == 0:
+        return np.zeros(0, dtype=np.int64)
+
+    n_buy = max(1, int(round(n_stocks * buy_fraction)))
+    n_sell = max(1, int(round(n_stocks * sell_fraction)))
+    n_buy = min(n_buy, n_stocks)
+    n_sell = min(n_sell, n_stocks)
+    if n_buy + n_sell > n_stocks:
+        n_sell = n_stocks - n_buy
+
+    order = np.argsort(alpha)
+    actions = np.full(n_stocks, HOLD, dtype=np.int64)
+    if n_sell > 0:
+        actions[order[:n_sell]] = SELL
+    if n_buy > 0:
+        actions[order[-n_buy:]] = BUY
+    return actions
 
 
 def portfolio_metrics(ledger: pd.DataFrame) -> dict[str, float]:
@@ -99,6 +128,31 @@ def mean_policy_entropy(model: PPO, obs: np.ndarray) -> float:
     obs_tensor, _ = model.policy.obs_to_tensor(obs)
     distribution = model.policy.get_distribution(obs_tensor)
     return float(distribution.entropy().mean().cpu().item())
+
+
+def _summarize_rollout(
+    rewards: list[float],
+    collected_actions: list[np.ndarray],
+    entropies: list[float] | None = None,
+) -> dict[str, float]:
+    stacked = (
+        np.stack(collected_actions, axis=0)
+        if collected_actions
+        else np.zeros((0, 1), dtype=np.int64)
+    )
+    shares = action_shares(stacked)
+    n_stocks = int(stacked.shape[1]) if stacked.size else 0
+    metrics = {
+        "mean_reward": float(np.mean(rewards)) if rewards else 0.0,
+        "n_steps": len(rewards),
+        "action_share_sell": shares["sell"],
+        "action_share_hold": shares["hold"],
+        "action_share_buy": shares["buy"],
+    }
+    if entropies is not None:
+        metrics["mean_entropy"] = float(np.mean(entropies)) if entropies else 0.0
+        metrics["max_entropy"] = float(n_stocks * math.log(3.0)) if n_stocks else 0.0
+    return metrics
 
 
 def _run_rollout(
@@ -167,21 +221,42 @@ def rollout_diagnostics(
         path.parent.mkdir(parents=True, exist_ok=True)
         ledger.to_csv(path, index=False)
 
-    stacked = (
-        np.stack(collected_actions, axis=0)
-        if collected_actions
-        else np.zeros((0, 1), dtype=np.int64)
-    )
-    shares = action_shares(stacked)
-    n_stocks = int(stacked.shape[1]) if stacked.size else 0
-    metrics = {
-        "mean_reward": float(np.mean(rewards)) if rewards else 0.0,
-        "n_steps": len(rewards),
-        "mean_entropy": float(np.mean(entropies)) if entropies else 0.0,
-        "max_entropy": float(n_stocks * math.log(3.0)) if n_stocks else 0.0,
-        "action_share_sell": shares["sell"],
-        "action_share_hold": shares["hold"],
-        "action_share_buy": shares["buy"],
-    }
+    metrics = _summarize_rollout(rewards, collected_actions, entropies)
     metrics.update(portfolio_metrics(ledger))
     return metrics
+
+
+def rollout_fixed_policy(
+    env: MultiStockTradingEnv,
+    action_fn: Callable[[MultiStockTradingEnv], np.ndarray],
+) -> dict[str, float]:
+    """Run one episode with a deterministic action function on a raw env."""
+    env.reset()
+    rewards: list[float] = []
+    collected_actions: list[np.ndarray] = []
+    terminated = False
+    truncated = False
+    while not (terminated or truncated):
+        action = np.asarray(action_fn(env), dtype=np.int64).reshape(-1)
+        collected_actions.append(action)
+        _, reward, terminated, truncated, _ = env.step(action)
+        rewards.append(float(reward))
+    return _summarize_rollout(rewards, collected_actions)
+
+
+def make_alpha_quantile_policy(
+    *,
+    buy_fraction: float = 0.3,
+    sell_fraction: float = 0.3,
+) -> Callable[[MultiStockTradingEnv], np.ndarray]:
+    """Policy: each day buy top-alpha / sell bottom-alpha quantiles."""
+
+    def _policy(env: MultiStockTradingEnv) -> np.ndarray:
+        alpha = env.panel.alpha[env.current_index]
+        return alpha_quantile_actions(
+            alpha,
+            buy_fraction=buy_fraction,
+            sell_fraction=sell_fraction,
+        )
+
+    return _policy

@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 from data_pipeline import DataSplit
 
-from models.alpha.config import TrainingConfig, XGBoostConfig
+from models.alpha.config import TrainingConfig, XGBoostConfig, default_xgboost_config
 from models.alpha.features import build_dataset, get_feature_names, load_splits
 from models.alpha.xgboost_model import XGBoostModel
 
@@ -24,9 +24,17 @@ def train_alpha_model(
 
     print(f"train samples: {len(train_dataset)}")
     print(f"validation samples: {len(validation_dataset)}")
+    print(
+        f"target: horizon={config.horizon_trading_days}d  "
+        f"active_return={config.active_return}  "
+        f"features={config.feature_set_name}"
+    )
 
     feature_names = get_feature_names(train_dataset, config.target_column)
-    xgb_config = model_config or XGBoostConfig(feature_names=feature_names)
+    xgb_config = model_config or default_xgboost_config(
+        feature_names,
+        include_fundamentals=config.include_fundamentals,
+    )
     model = XGBoostModel(xgb_config)
 
     model.fit(
@@ -36,8 +44,13 @@ def train_alpha_model(
     )
 
     metrics = evaluate(validation_dataset, model, config.target_column)
+    metrics["include_fundamentals"] = config.include_fundamentals
+    metrics["feature_set"] = config.feature_set_name
+    metrics["feature_names"] = list(feature_names)
+    metrics["horizon_trading_days"] = config.horizon_trading_days
+    metrics["active_return"] = config.active_return
     _print_metrics(metrics)
-    _save_metrics(metrics, config.artifact_dir)
+    _save_metrics(metrics, config)
 
     model.save(config.artifact_dir)
 
@@ -63,16 +76,17 @@ def evaluate(
 
 
 def _print_metrics(metrics: dict[str, float]) -> None:
-    print("validation metrics:")
+    print(f"validation metrics ({metrics.get('feature_set', 'unknown')}):")
     print(f"  mse: {metrics['mse']:.6f}")
     print(f"  ic:  {metrics['ic']:.4f}")
     print(f"  n:   {metrics['n_samples']}")
 
 
-def _save_metrics(metrics: dict[str, float], artifact_dir: Path) -> None:
+def _save_metrics(metrics: dict, config: TrainingConfig) -> None:
     eval_dir = Path("eval")
     eval_dir.mkdir(parents=True, exist_ok=True)
-    metrics_path = eval_dir / "alpha_training_metrics.json"
+    suffix = "" if config.include_fundamentals else "_market_only"
+    metrics_path = eval_dir / f"alpha_training_metrics{suffix}.json"
     with metrics_path.open("w", encoding="utf-8") as metrics_file:
         json.dump(metrics, metrics_file, indent=2)
     print(f"metrics saved to {metrics_path}")

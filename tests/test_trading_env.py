@@ -31,7 +31,7 @@ def test_env_passes_gymnasium_checker() -> None:
 def test_observation_and_action_shapes() -> None:
     env = _make_env(n_stocks=4)
     obs, _ = env.reset(seed=0)
-    assert obs.shape == (4 * env.n_stocks + 1,)
+    assert obs.shape == (5 * env.n_stocks + 1,)
     assert env.action_space.nvec.tolist() == [3] * env.n_stocks
 
 

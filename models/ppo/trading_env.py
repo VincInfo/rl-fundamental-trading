@@ -29,8 +29,9 @@ class MultiStockTradingEnv(gym.Env):
         panel: MarketPanel,
         initial_cash: float = 1_000_000.0,
         transaction_cost_bps: float = 10.0,
-        trade_penalty_bps: float = 2.0,
-        min_holding_days: int = 3,
+        trade_penalty_bps: float = 10.0,
+        alpha_alignment_bps: float = 5.0,
+        min_holding_days: int = 5,
         w_max: float = 0.2,
         rebalance_budget: float = 0.2,
         eps: float = 1e-8,
@@ -46,6 +47,8 @@ class MultiStockTradingEnv(gym.Env):
                 Basispunkten (1 bp = 0,01 %); senken den Portfoliowert je Turnover.
             trade_penalty_bps: Zusätzlicher Reward-Abzug pro Turnover-Einheit als
                 Overtrading-Bremse; wirkt nur auf das Lernsignal, nicht auf den Wert.
+            alpha_alignment_bps: Reward-Bonus, wenn Aktionen mit dem Alpha-Vorzeichen
+                übereinstimmen (gewichtet mit risikoadjustiertem q).
             min_holding_days: Mindesthaltedauer nach einem Kauf, bevor ein Verkauf
                 derselben Position erlaubt ist.
             w_max: Maximales Portfolio-Gewicht je Einzelaktie; erzwingt Diversifikation.
@@ -64,14 +67,15 @@ class MultiStockTradingEnv(gym.Env):
         self.initial_cash = float(initial_cash)
         self.transaction_cost_rate = float(transaction_cost_bps) / 10_000.0
         self.trade_penalty_rate = float(trade_penalty_bps) / 10_000.0
+        self.alpha_alignment_rate = float(alpha_alignment_bps) / 10_000.0
         self.min_holding_days = int(min_holding_days)
         self.w_max = float(w_max)
         self.rebalance_budget = float(rebalance_budget)
         self.eps = float(eps)
 
         self.action_space = spaces.MultiDiscrete([3] * self.n_stocks)
-        # State: Alpha (N) + Volatilität (N) + Gewichte inkl. Cash (N+1) + Returns (N)
-        observation_dim = 4 * self.n_stocks + 1
+        # State: Alpha (N) + q (N) + signed_z (N) + Gewichte inkl. Cash (N+1) + Returns (N)
+        observation_dim = 5 * self.n_stocks + 1
         self.observation_space = spaces.Box(
             low=-np.inf,
             high=np.inf,
@@ -95,6 +99,9 @@ class MultiStockTradingEnv(gym.Env):
         cash_weight = self.cash / portfolio_value
         return stock_weights, cash_weight
 
+    def _signed_opportunity(self, alpha: np.ndarray, sigma: np.ndarray) -> np.ndarray:
+        return alpha / (sigma + self.eps)
+
     def _risk_adjusted_opportunity(self, alpha: np.ndarray, sigma: np.ndarray) -> np.ndarray:
         # z_i = |alpha_i| / (sigma_i + eps), anschließend auf Summe 1 normiert.
         z = np.abs(alpha) / (sigma + self.eps)
@@ -105,11 +112,16 @@ class MultiStockTradingEnv(gym.Env):
 
     def _build_observation(self) -> np.ndarray:
         t = self.current_index
+        alpha = self.panel.alpha[t]
+        sigma = self.panel.volatility[t]
+        q = self._risk_adjusted_opportunity(alpha, sigma)
+        signed_z = self._signed_opportunity(alpha, sigma)
         stock_weights, cash_weight = self._weights()
         observation = np.concatenate(
             [
-                self.panel.alpha[t],
-                self.panel.volatility[t],
+                alpha,
+                q,
+                signed_z,
                 stock_weights,
                 np.array([cash_weight], dtype=np.float64),
                 self.panel.returns[t],
@@ -145,7 +157,8 @@ class MultiStockTradingEnv(gym.Env):
         prev_value = self._portfolio_value()
         prev_weights = self.holdings / max(prev_value, self.eps)
 
-        q = self._risk_adjusted_opportunity(self.panel.alpha[t], self.panel.volatility[t])
+        alpha = self.panel.alpha[t]
+        q = self._risk_adjusted_opportunity(alpha, self.panel.volatility[t])
         direction = _ACTION_TO_DIRECTION[action]
 
         # Overtrading-Bremse: frühe Sells auf gehaltenen Positionen blockieren.
@@ -172,9 +185,13 @@ class MultiStockTradingEnv(gym.Env):
         self.holdings = self.holdings * (1.0 + self.panel.returns[self.current_index])
         new_value = self._portfolio_value()
 
+        # Encourage trades that agree with alpha direction, weighted by opportunity q.
+        alpha_sign = np.sign(alpha)
+        alignment = float(np.sum(direction * alpha_sign * q))
         reward = float(
             np.log(max(new_value, self.eps) / max(prev_value, self.eps))
             - self.trade_penalty_rate * turnover
+            + self.alpha_alignment_rate * alignment
         )
 
         held = self.holdings > self.eps
@@ -189,6 +206,7 @@ class MultiStockTradingEnv(gym.Env):
             n_blocked=int(np.sum(blocked)),
             portfolio_value=new_value,
             action=action,
+            alignment=alignment,
         )
         return self._build_observation(), reward, terminated, truncated, info
 
@@ -201,6 +219,7 @@ class MultiStockTradingEnv(gym.Env):
         n_blocked: int,
         portfolio_value: float,
         action: np.ndarray | None = None,
+        alignment: float = 0.0,
     ) -> dict[str, Any]:
         return {
             "date": self.panel.dates[self.current_index],
@@ -210,6 +229,7 @@ class MultiStockTradingEnv(gym.Env):
             "cost_rate": float(cost_rate),
             "transaction_cost": float(transaction_cost),
             "n_blocked": int(n_blocked),
+            "alignment": float(alignment),
             "action": action.tolist() if action is not None else [HOLD] * self.n_stocks,
         }
 

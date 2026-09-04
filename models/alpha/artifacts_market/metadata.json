@@ -1,0 +1,14 @@
+{
+  "feature_names": [
+    "return_1d",
+    "return_5d",
+    "momentum_20d",
+    "vol_20d",
+    "oc_return",
+    "hl_range",
+    "volume_change_1d",
+    "rel_volume_20d"
+  ],
+  "model_type": "xgboost.Booster",
+  "target_column": "target_return"
+}
