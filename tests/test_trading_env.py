@@ -58,3 +58,12 @@ def test_min_holding_days_blocks_early_sell() -> None:
     sell_all = np.zeros(env.n_stocks, dtype=np.int64)
     _, _, _, _, info = env.step(sell_all)  # unmittelbarer Verkauf muss blockiert werden
     assert info["n_blocked"] > 0
+
+
+def test_transaction_cost_info_contains_absolute_cost() -> None:
+    env = _make_env(n_stocks=3, n_days=60)
+    env.reset(seed=0)
+
+    _, _, _, _, info = env.step(np.full(env.n_stocks, 2, dtype=np.int64))
+
+    assert info["transaction_cost"] == env.initial_cash * info["cost_rate"]

@@ -333,9 +333,16 @@ Positionsänderung übersetzt.
 Für die finale Evaluation wird der Agent deterministisch ausgeführt, damit der
 Testlauf reproduzierbar bleibt.
 
-**Noch nicht implementiert:** Die bestehende Auswertung erfasst bereits
-Aktionen und Rewards -> noch keine vollständige Equity-Kurve + nicht
-alle Portfolio-Metriken in einer mit den Baselines vergleichbaren Form
+Die PPO-Auswertung erfasst eine tägliche Portfolio-Zeitreihe mit
+Portfolio-Wert, Cash, Turnover, absoluten Transaktionskosten, Reward und
+Aktionen. Die gemeinsamen Portfolio-Metriken werden daraus berechnet. Die
+Train- und Validation-Ledger werden zusätzlich als
+`eval/ppo_train_portfolio.csv` beziehungsweise
+`eval/ppo_validation_portfolio.csv` gespeichert.
+
+**Noch nicht implementiert:** Die Baselines müssen noch dieselbe
+Portfolio- und Kostenlogik verwenden, damit sie direkt mit dem PPO-Agenten
+verglichen werden können.
 
 
 ## Einfluss des Alpha-Modells auf PPO

@@ -129,7 +129,11 @@ class MultiStockTradingEnv(gym.Env):
         self.holdings = np.zeros(self.n_stocks, dtype=np.float64)
         self.holding_days = np.zeros(self.n_stocks, dtype=np.int64)
         return self._build_observation(), self._build_info(
-            turnover=0.0, cost_rate=0.0, n_blocked=0, portfolio_value=self.initial_cash
+            turnover=0.0,
+            cost_rate=0.0,
+            transaction_cost=0.0,
+            n_blocked=0,
+            portfolio_value=self.initial_cash,
         )
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
@@ -157,6 +161,7 @@ class MultiStockTradingEnv(gym.Env):
 
         turnover = float(np.abs(target_weights - prev_weights).sum())
         cost_rate = self.transaction_cost_rate * turnover
+        transaction_cost = prev_value * cost_rate
         value_after_cost = prev_value * (1.0 - cost_rate)
 
         self.holdings = target_weights * value_after_cost
@@ -180,6 +185,7 @@ class MultiStockTradingEnv(gym.Env):
         info = self._build_info(
             turnover=turnover,
             cost_rate=cost_rate,
+            transaction_cost=transaction_cost,
             n_blocked=int(np.sum(blocked)),
             portfolio_value=new_value,
             action=action,
@@ -191,6 +197,7 @@ class MultiStockTradingEnv(gym.Env):
         *,
         turnover: float,
         cost_rate: float,
+        transaction_cost: float,
         n_blocked: int,
         portfolio_value: float,
         action: np.ndarray | None = None,
@@ -201,6 +208,7 @@ class MultiStockTradingEnv(gym.Env):
             "cash": float(self.cash),
             "turnover": float(turnover),
             "cost_rate": float(cost_rate),
+            "transaction_cost": float(transaction_cost),
             "n_blocked": int(n_blocked),
             "action": action.tolist() if action is not None else [HOLD] * self.n_stocks,
         }
