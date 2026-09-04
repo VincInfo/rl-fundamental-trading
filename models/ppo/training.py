@@ -9,7 +9,7 @@ from data_pipeline import DataSplit
 from models.alpha.features import load_splits
 from models.alpha.scoring import load_trained_alpha_model, predict_alpha_wide
 from models.ppo.config import EnvConfig, TrainingConfig
-from models.ppo.evaluation import (
+from eval.ppo import (
     episode_length,
     equal_weight_mean_log_return,
     rollout_diagnostics,
@@ -158,7 +158,9 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
     print(f"model saved to {config.artifact_dir / 'ppo_agent'}")
     print(f"vecnormalize saved to {vecnormalize_path}")
 
-    train_metrics = rollout_diagnostics(ppo, env)
+    train_metrics = rollout_diagnostics(
+        ppo, env, ledger_path=Path("eval") / "ppo_train_portfolio.csv"
+    )
     _print_split_diagnostics("train", train_metrics)
 
     validation_env = _make_vec_env(
@@ -168,7 +170,9 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
         training=False,
     )
     validation_env.obs_rms = env.obs_rms
-    validation_metrics = rollout_diagnostics(ppo, validation_env)
+    validation_metrics = rollout_diagnostics(
+        ppo, validation_env, ledger_path=Path("eval") / "ppo_validation_portfolio.csv"
+    )
     _print_split_diagnostics("val", validation_metrics)
 
     validation_panel = build_panel(
