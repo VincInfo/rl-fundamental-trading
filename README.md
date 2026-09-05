@@ -46,6 +46,44 @@ Die Fundamentals-Pipeline kann in diesem Repository so ausgeführt werden:
 uv run python pipeline/run_fundamentals_pipeline.py
 ```
 
+## End-to-End-Workflow
+
+Der vollständige Ablauf besteht aus vier Schritten. Die Schritte müssen in
+dieser Reihenfolge ausgeführt werden, weil jeder Trainingsschritt die Artefakte
+des vorherigen Schritts benötigt:
+
+```bash
+# 1. Alpha-Modell auf Train/Validation trainieren
+uv run python pipeline/train_alpha_model.py
+
+# 2. PPO mit dem gespeicherten Alpha-Modell trainieren
+uv run python pipeline/train_ppo.py
+
+# 3. Einmalige finale Auswertung auf dem ungesehenen Test-Split
+uv run python -m eval.run_test_evaluation
+
+# 4. Tabellen und Abbildungen aus den erzeugten Ergebnissen laden
+#    notebooks/evaluation_results.ipynb in VS Code mit Run All ausführen
+```
+
+Der erste Befehl erzeugt das Alpha-Artefakt unter
+`models/alpha/artifacts/` sowie `eval/results/alpha_training_metrics.json`. Der zweite
+Befehl erzeugt `models/ppo/artifacts/` sowie PPO-Diagnostiken unter
+`eval/results/`.
+Erst danach kann `eval.run_test_evaluation` die gespeicherten Modelle auf dem
+Test-Split ausführen. Dabei entstehen unter anderem die Test-Ledger und
+`eval/results/test_performance_summary.csv`.
+
+`pipeline/run_fundamentals_pipeline.py` ist kein Trainings- oder
+Evaluations-Entry-Point. Das Script lädt die gemeinsame Datenpipeline und
+prüft beziehungsweise zeigt die Größen der zeitlichen Splits an. Die Trainings-
+und Evaluations-Entry-Points sind die drei Befehle in der obigen Reihenfolge.
+
+Falls der Test-Runner mit `Alpha model not found` abbricht, fehlt Schritt 1.
+Falls danach PPO-Artefakte fehlen, fehlt Schritt 2. Bereits vorhandene
+Artefakte können wiederverwendet werden; die jeweiligen Trainingsschritte
+müssen dann nicht erneut ausgeführt werden.
+
 ## Workflow mit uv
 
 1. Neue Abhängigkeit hinzufügen:

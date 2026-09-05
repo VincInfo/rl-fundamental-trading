@@ -4,6 +4,7 @@ from typing import Sequence
 
 
 DEFAULT_ARTIFACT_DIR = Path("models/alpha/artifacts")
+DEFAULT_EVALUATION_OUTPUT_DIR = Path("eval/results")
 TARGET_COLUMN = "target_return"
 
 ENGINEERED_FEATURE_COLUMNS = (
@@ -45,6 +46,7 @@ class TrainingConfig:
     bars_per_trading_day: int = 7
     target_column: str = TARGET_COLUMN
     artifact_dir: Path = DEFAULT_ARTIFACT_DIR
+    evaluation_output_dir: Path = DEFAULT_EVALUATION_OUTPUT_DIR
     sample_daily: bool = True
 
 

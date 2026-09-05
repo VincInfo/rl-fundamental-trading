@@ -8,7 +8,7 @@ from data_pipeline import DataSplit, DataVariant, get_data
 
 @dataclass(frozen=True)
 class SplitSummary:
-    """Compact metadata for one chronologically split data frame."""
+    """Compact metadata for one chronologically split data frame"""
 
     split: DataSplit
     start: pd.Timestamp
@@ -20,7 +20,7 @@ class SplitSummary:
 def load_evaluation_splits(
     variant: DataVariant = DataVariant.WITH_FUNDAMENTALS,
 ) -> dict[DataSplit, pd.DataFrame]:
-    """Load and validate all chronological splits from the data provider."""
+    """Load and validate all chronological splits from the data provider"""
     splits = get_data(variant)
     validate_splits(splits)
     return {
@@ -31,7 +31,7 @@ def load_evaluation_splits(
 
 
 def validate_splits(splits: dict[DataSplit, pd.DataFrame]) -> None:
-    """Validate split presence, temporal ordering, and compatible schemas."""
+    """Validate split presence, temporal ordering, and compatible schemas"""
     expected_splits = set(DataSplit)
     if set(splits) != expected_splits:
         missing = expected_splits - set(splits)
@@ -75,7 +75,7 @@ def validate_splits(splits: dict[DataSplit, pd.DataFrame]) -> None:
 def summarize_splits(
     splits: dict[DataSplit, pd.DataFrame],
 ) -> dict[DataSplit, SplitSummary]:
-    """Return reproducible date and shape metadata for validated splits."""
+    """Return reproducible date and shape metadata for validated splits"""
     validate_splits(splits)
     return {
         split: SplitSummary(

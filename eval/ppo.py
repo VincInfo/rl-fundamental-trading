@@ -1,3 +1,5 @@
+"""PPO rollout diagnostics and portfolio metrics for model evaluation."""
+
 from __future__ import annotations
 
 import math
@@ -14,7 +16,7 @@ try:
     from stable_baselines3.common.vec_env import VecNormalize
 except ImportError as exc:  # pragma: no cover
     raise RuntimeError(
-        "stable-baselines3 fehlt. Installiere es mit: uv add stable-baselines3"
+        "stable-baselines3 is missing. Install it with: uv add stable-baselines3"
     ) from exc
 
 ACTION_NAMES = {SELL: "sell", HOLD: "hold", BUY: "buy"}

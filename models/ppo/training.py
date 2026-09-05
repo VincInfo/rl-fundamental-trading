@@ -36,6 +36,11 @@ def load_alpha_wide(path: str) -> pd.DataFrame:
     return pd.read_csv(path, index_col=0, parse_dates=True)
 
 
+def neutral_alpha_scores(alpha_wide: pd.DataFrame) -> pd.DataFrame:
+    """Replace alpha rankings by equal positive scores for all stocks."""
+    return pd.DataFrame(1.0, index=alpha_wide.index, columns=alpha_wide.columns)
+
+
 def build_env(
     features: pd.DataFrame,
     alpha_wide: pd.DataFrame,
@@ -82,8 +87,7 @@ def _print_split_diagnostics(label: str, metrics: dict[str, float]) -> None:
     )
 
 
-def _save_metrics(metrics: dict) -> None:
-    eval_dir = Path("eval")
+def _save_metrics(metrics: dict, eval_dir: Path) -> None:
     eval_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = eval_dir / "ppo_training_metrics.json"
     with metrics_path.open("w", encoding="utf-8") as metrics_file:
@@ -107,6 +111,9 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
     else:
         train_alpha = load_alpha_wide(config.alpha_scores_path)
     validation_alpha = predict_alpha_wide(alpha_model, validation_wide)
+    if config.neutral_alpha:
+        train_alpha = neutral_alpha_scores(train_alpha)
+        validation_alpha = neutral_alpha_scores(validation_alpha)
 
     train_days = int(train_features["date"].nunique())
     validation_days = int(validation_features["date"].nunique())
@@ -159,7 +166,9 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
     print(f"vecnormalize saved to {vecnormalize_path}")
 
     train_metrics = rollout_diagnostics(
-        ppo, env, ledger_path=Path("eval") / "ppo_train_portfolio.csv"
+        ppo,
+        env,
+        ledger_path=config.evaluation_output_dir / "ppo_train_portfolio.csv",
     )
     _print_split_diagnostics("train", train_metrics)
 
@@ -171,7 +180,9 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
     )
     validation_env.obs_rms = env.obs_rms
     validation_metrics = rollout_diagnostics(
-        ppo, validation_env, ledger_path=Path("eval") / "ppo_validation_portfolio.csv"
+        ppo,
+        validation_env,
+        ledger_path=config.evaluation_output_dir / "ppo_validation_portfolio.csv",
     )
     _print_split_diagnostics("val", validation_metrics)
 
@@ -196,7 +207,8 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
             "train": train_metrics,
             "validation": validation_metrics,
             "validation_equal_weight_mean_log_return": equal_weight,
-        }
+        },
+        config.evaluation_output_dir,
     )
 
     return ppo

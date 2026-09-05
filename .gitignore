@@ -33,7 +33,13 @@ models/alpha/artifacts/*
 !models/alpha/artifacts/.gitkeep
 models/ppo/artifacts/*
 !models/ppo/artifacts/.gitkeep
+models/ppo/artifacts_neutral_alpha/*
+!models/ppo/artifacts_neutral_alpha/.gitkeep
 
 # Notebook cache (pickled pipeline output)
 **/.cache/
 notebooks/.cache/
+
+# Generated evaluation outputs
+eval/results/*
+!eval/results/.gitkeep

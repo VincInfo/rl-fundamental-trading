@@ -35,10 +35,21 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
+        "--neutral-alpha",
+        action="store_true",
+        help="Train an ablation with equal positive alpha scores for all stocks.",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=DEFAULT_ARTIFACT_DIR,
         help="Directory for the trained model artifact.",
+    )
+    parser.add_argument(
+        "--evaluation-output",
+        type=Path,
+        default=Path("eval/results"),
+        help="Directory for training and validation diagnostics.",
     )
     return parser.parse_args()
 
@@ -50,7 +61,9 @@ def main() -> None:
         seed=args.seed,
         alpha_model_dir=args.alpha_model,
         alpha_scores_path=args.alpha_scores,
+        neutral_alpha=args.neutral_alpha,
         artifact_dir=args.output,
+        evaluation_output_dir=args.evaluation_output,
         env=EnvConfig(
             vol_window=args.vol_window,
             min_holding_days=args.min_holding_days,

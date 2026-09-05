@@ -38,6 +38,8 @@ class TrainingConfig:
     seed: int = 42
     alpha_model_dir: Path = DEFAULT_ALPHA_ARTIFACT_DIR
     alpha_scores_path: str | None = None
+    neutral_alpha: bool = False
     artifact_dir: Path = DEFAULT_ARTIFACT_DIR
+    evaluation_output_dir: Path = Path("eval/results")
     env: EnvConfig = field(default_factory=EnvConfig)
     ppo: PpoConfig = field(default_factory=PpoConfig)

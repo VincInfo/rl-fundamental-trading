@@ -37,7 +37,7 @@ def train_alpha_model(
 
     metrics = evaluate(validation_dataset, model, config.target_column)
     _print_metrics(metrics)
-    _save_metrics(metrics, config.artifact_dir)
+    _save_metrics(metrics, config.evaluation_output_dir)
 
     model.save(config.artifact_dir)
 
@@ -69,8 +69,7 @@ def _print_metrics(metrics: dict[str, float]) -> None:
     print(f"  n:   {metrics['n_samples']}")
 
 
-def _save_metrics(metrics: dict[str, float], artifact_dir: Path) -> None:
-    eval_dir = Path("eval")
+def _save_metrics(metrics: dict[str, float], eval_dir: Path) -> None:
     eval_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = eval_dir / "alpha_training_metrics.json"
     with metrics_path.open("w", encoding="utf-8") as metrics_file:
