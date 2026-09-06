@@ -24,17 +24,38 @@ def _synthetic_wide_frame(rows: int, tickers: list[str]) -> pd.DataFrame:
     )
     columns = pd.MultiIndex.from_product(
         [
-            ["Close", "roe", "gross_margin", "debt_to_equity", "filing_lag_days"],
+            [
+                "Open",
+                "High",
+                "Low",
+                "Close",
+                "Volume",
+                "roe",
+                "gross_margin",
+                "debt_to_equity",
+                "revenue",
+                "net_income",
+                "operating_cashflow",
+                "filing_lag_days",
+            ],
             tickers,
         ],
         names=["Feature", "Ticker"],
     )
     values = pd.DataFrame(index=index, columns=columns, dtype=float)
-    for ticker in tickers:
-        values[("Close", ticker)] = 100 + pd.Series(range(rows), index=index) * 0.1
-        values[("roe", ticker)] = 0.2
-        values[("gross_margin", ticker)] = 0.4
-        values[("debt_to_equity", ticker)] = 0.5
+    for offset, ticker in enumerate(tickers):
+        close = 100 + pd.Series(range(rows), index=index) * (0.1 + 0.05 * offset)
+        values[("Close", ticker)] = close
+        values[("Open", ticker)] = close * 0.999
+        values[("High", ticker)] = close * 1.002
+        values[("Low", ticker)] = close * 0.998
+        values[("Volume", ticker)] = 1_000_000 + pd.Series(range(rows), index=index) * 10
+        values[("roe", ticker)] = 0.2 + 0.01 * offset
+        values[("gross_margin", ticker)] = 0.4 + 0.05 * offset
+        values[("debt_to_equity", ticker)] = 0.5 + 0.1 * offset
+        values[("revenue", ticker)] = 1_000.0 + 50 * offset
+        values[("net_income", ticker)] = 100.0 + 10 * offset
+        values[("operating_cashflow", ticker)] = 120.0 + 10 * offset
         values[("filing_lag_days", ticker)] = 30
     return values
 
@@ -70,11 +91,12 @@ def test_load_trained_alpha_model_requires_artifact(tmp_path: Path):
 
 def test_predict_alpha_wide_feeds_panel():
     tickers = ["AAPL", "MSFT"]
-    wide_frame = _synthetic_wide_frame(rows=300, tickers=tickers)
+    wide_frame = _synthetic_wide_frame(rows=400, tickers=tickers)
     config = TrainingConfig(
         horizon_trading_days=5,
         bars_per_trading_day=7,
         sample_daily=True,
+        active_return=False,
     )
     dataset = build_dataset(wide_frame, config)
     dates = dataset.index.get_level_values("Datetime")
@@ -86,7 +108,7 @@ def test_predict_alpha_wide_feeds_panel():
     model = XGBoostModel(
         XGBoostConfig(
             feature_names=list(MODEL_FEATURE_COLUMNS),
-            n_estimators=8,
+            n_estimators=32,
             early_stopping_rounds=None,
             verbose=False,
         )
@@ -94,6 +116,8 @@ def test_predict_alpha_wide_feeds_panel():
     model.fit(train, validation, target_column=config.target_column)
 
     alpha_wide = predict_alpha_wide(model, wide_frame, config)
+    assert not (alpha_wide.to_numpy() == 0.0).all()
+
     market_features = build_market_features(wide_frame)
     panel = build_panel(market_features, alpha_wide, vol_window=3)
 
