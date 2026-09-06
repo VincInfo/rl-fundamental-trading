@@ -3,14 +3,14 @@ import math
 import numpy as np
 import pandas as pd
 
-from models.ppo.evaluation import (
+from models.rl.evaluation import (
     action_shares,
     episode_length,
     equal_weight_mean_log_return,
 )
-from models.ppo.panel import build_panel
-from models.ppo.synthetic import make_synthetic_features
-from models.ppo.trading_env import BUY, HOLD, SELL
+from models.rl.panel import build_panel
+from models.rl.synthetic import make_synthetic_features
+from models.rl.envs import BUY, HOLD, SELL
 
 
 def _random_alpha_wide(features: pd.DataFrame, seed: int) -> pd.DataFrame:

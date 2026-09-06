@@ -11,8 +11,8 @@ from models.alpha.scoring import (
     scores_to_wide,
 )
 from models.alpha.xgboost_model import XGBoostModel
-from models.ppo.features import build_market_features
-from models.ppo.panel import build_panel
+from models.rl.features import build_market_features
+from models.rl.panel import build_panel
 
 
 def _synthetic_wide_frame(rows: int, tickers: list[str]) -> pd.DataFrame:

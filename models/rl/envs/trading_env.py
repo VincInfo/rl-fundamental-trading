@@ -6,7 +6,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
-from models.ppo.panel import MarketPanel
+from models.rl.panel import MarketPanel
 
 SELL, HOLD, BUY = 0, 1, 2
 # Bildet die diskreten Aktionen auf Handelsrichtungen {-1, 0, +1} ab.
@@ -137,12 +137,19 @@ class MultiStockTradingEnv(gym.Env):
         if action.shape[0] != self.n_stocks:
             raise ValueError(f"Aktion hat Länge {action.shape[0]}, erwartet {self.n_stocks}.")
 
+        direction = _ACTION_TO_DIRECTION[action]
+        return self._apply_direction(direction, action)
+
+    def _apply_direction(
+        self,
+        direction: np.ndarray,
+        raw_action: np.ndarray,
+    ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         t = self.current_index
         prev_value = self._portfolio_value()
         prev_weights = self.holdings / max(prev_value, self.eps)
 
         q = self._risk_adjusted_opportunity(self.panel.alpha[t], self.panel.volatility[t])
-        direction = _ACTION_TO_DIRECTION[action]
 
         # Overtrading-Bremse: frühe Sells auf gehaltenen Positionen blockieren.
         blocked = (direction < 0.0) & (self.holding_days < self.min_holding_days) & (prev_weights > 0.0)
@@ -162,7 +169,6 @@ class MultiStockTradingEnv(gym.Env):
         self.holdings = target_weights * value_after_cost
         self.cash = value_after_cost - float(self.holdings.sum())
 
-        # Übergang auf den nächsten Handelstag und Marktbewegung anwenden.
         self.current_index += 1
         self.holdings = self.holdings * (1.0 + self.panel.returns[self.current_index])
         new_value = self._portfolio_value()
@@ -182,7 +188,7 @@ class MultiStockTradingEnv(gym.Env):
             cost_rate=cost_rate,
             n_blocked=int(np.sum(blocked)),
             portfolio_value=new_value,
-            action=action,
+            action=raw_action,
         )
         return self._build_observation(), reward, terminated, truncated, info
 
@@ -211,3 +217,5 @@ class MultiStockTradingEnv(gym.Env):
             f"{date} | value={self._portfolio_value():.2f} | "
             f"cash={self.cash:.2f} | positions={np.count_nonzero(self.holdings > self.eps)}"
         )
+
+

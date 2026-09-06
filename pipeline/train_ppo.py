@@ -7,17 +7,23 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from models.alpha.config import DEFAULT_ARTIFACT_DIR as DEFAULT_ALPHA_ARTIFACT_DIR
-from models.ppo.config import DEFAULT_ARTIFACT_DIR, EnvConfig, TrainingConfig
-from models.ppo.training import train_ppo_model
+from models.rl.config import DEFAULT_ARTIFACT_DIR, EnvConfig, TrainingConfig
+from models.rl.training import train_agent_model
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train the PPO trading agent.")
+    parser = argparse.ArgumentParser(description="Train the RL trading agent (PPO or SAC).")
+    parser.add_argument(
+        "--algorithm",
+        choices=("ppo", "sac"),
+        default="ppo",
+        help="RL algorithm to use. PPO uses a discrete action space, SAC a continuous one.",
+    )
     parser.add_argument(
         "--timesteps",
         type=int,
         default=200_000,
-        help="PPO environment steps. 20_000 is only a smoke test; default is 200_000.",
+        help="Environment steps. 20_000 is only a smoke test; default is 200_000.",
     )
     parser.add_argument("--vol-window", type=int, default=20)
     parser.add_argument("--min-holding-days", type=int, default=3)
@@ -48,6 +54,7 @@ def main() -> None:
     config = TrainingConfig(
         timesteps=args.timesteps,
         seed=args.seed,
+        algorithm=args.algorithm,
         alpha_model_dir=args.alpha_model,
         alpha_scores_path=args.alpha_scores,
         artifact_dir=args.output,
@@ -56,7 +63,7 @@ def main() -> None:
             min_holding_days=args.min_holding_days,
         ),
     )
-    train_ppo_model(training_config=config)
+    train_agent_model(training_config=config)
 
 
 if __name__ == "__main__":

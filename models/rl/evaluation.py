@@ -4,11 +4,12 @@ import math
 
 import numpy as np
 
-from models.ppo.panel import MarketPanel
-from models.ppo.trading_env import BUY, HOLD, SELL
+from models.rl.panel import MarketPanel
+from models.rl.envs import BUY, HOLD, SELL
 
 try:
-    from stable_baselines3 import PPO
+    from stable_baselines3 import PPO, SAC
+    from stable_baselines3.common.base_class import BaseAlgorithm
     from stable_baselines3.common.vec_env import VecNormalize
 except ImportError as exc:  # pragma: no cover
     raise RuntimeError(
@@ -16,6 +17,7 @@ except ImportError as exc:  # pragma: no cover
     ) from exc
 
 ACTION_NAMES = {SELL: "sell", HOLD: "hold", BUY: "buy"}
+CONTINUOUS_ACTION_THRESHOLD = 0.1
 
 
 def episode_length(n_days: int) -> int:
@@ -80,3 +82,54 @@ def rollout_diagnostics(model: PPO, env: VecNormalize) -> dict[str, float]:
         "action_share_hold": shares["hold"],
         "action_share_buy": shares["buy"],
     }
+
+
+def continuous_action_shares(
+    actions: np.ndarray,
+    threshold: float = CONTINUOUS_ACTION_THRESHOLD,
+) -> dict[str, float]:
+    """Interpret continuous actions in [-1, 1] as buy/hold/sell buckets."""
+    if actions.size == 0:
+        return {"sell": 0.0, "hold": 0.0, "buy": 0.0}
+    return {
+        "sell": float((actions < -threshold).mean()),
+        "hold": float((np.abs(actions) <= threshold).mean()),
+        "buy": float((actions > threshold).mean()),
+    }
+
+
+def continuous_rollout_diagnostics(model: SAC, env: VecNormalize) -> dict[str, float]:
+    """Deterministic episode diagnostics for a continuous-action agent (SAC)."""
+    obs = env.reset()
+    rewards: list[float] = []
+    collected_actions: list[np.ndarray] = []
+    done = False
+    while not done:
+        action, _ = model.predict(obs, deterministic=True)
+        collected_actions.append(np.asarray(action, dtype=np.float64).reshape(-1))
+        obs, reward, dones, _ = env.step(action)
+        rewards.append(float(reward[0]))
+        done = bool(dones[0])
+
+    stacked = (
+        np.stack(collected_actions, axis=0)
+        if collected_actions
+        else np.zeros((0, 1), dtype=np.float64)
+    )
+    shares = continuous_action_shares(stacked)
+    return {
+        "mean_reward": float(np.mean(rewards)) if rewards else 0.0,
+        "n_steps": len(rewards),
+        "action_mean_abs": float(np.mean(np.abs(stacked))) if stacked.size else 0.0,
+        "action_std": float(np.std(stacked)) if stacked.size else 0.0,
+        "action_share_sell": shares["sell"],
+        "action_share_hold": shares["hold"],
+        "action_share_buy": shares["buy"],
+    }
+
+
+def diagnostics_for(model: BaseAlgorithm, env: VecNormalize) -> dict[str, float]:
+    """Dispatch to the appropriate rollout diagnostics based on model type."""
+    if isinstance(model, SAC):
+        return continuous_rollout_diagnostics(model, env)
+    return rollout_diagnostics(model, env)
