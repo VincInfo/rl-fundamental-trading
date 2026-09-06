@@ -16,6 +16,11 @@ from eval.ppo import (
     rollout_diagnostics,
     rollout_fixed_policy,
 )
+from models.ppo.callbacks import (
+    KeepRegularizedPPO,
+    UnshapedEvalCallback,
+    init_keep_logit_bias,
+)
 from models.ppo.features import build_market_features
 from models.ppo.imitation import behavioral_clone_policy, collect_vec_demonstrations
 from models.ppo.panel import build_panel
@@ -24,10 +29,6 @@ from models.ppo.trading_env import MultiStockTradingEnv
 
 try:
     from stable_baselines3 import PPO
-    from stable_baselines3.common.callbacks import (
-        EvalCallback,
-        StopTrainingOnNoModelImprovement,
-    )
     from stable_baselines3.common.env_checker import check_env
     from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 except ImportError as exc:  # pragma: no cover - klare Meldung falls RL-Extra fehlt
@@ -50,8 +51,10 @@ def build_env(
     env_config: EnvConfig,
     *,
     residual: bool = False,
+    randomize_start: bool = False,
 ) -> MultiStockTradingEnv | ResidualAlphaEnv:
     panel = build_panel(features, alpha_wide, vol_window=env_config.vol_window)
+    window = env_config.episode_window if randomize_start else None
     env: MultiStockTradingEnv | ResidualAlphaEnv = MultiStockTradingEnv(
         panel,
         initial_cash=env_config.initial_cash,
@@ -62,6 +65,12 @@ def build_env(
         w_max=env_config.w_max,
         rebalance_budget=env_config.rebalance_budget,
         eps=env_config.eps,
+        episode_window=window,
+        randomize_start=randomize_start,
+        rebalance_every=env_config.rebalance_every,
+        allow_short=env_config.allow_short,
+        max_gross_exposure=env_config.max_gross_exposure,
+        rebalance_mode=env_config.rebalance_mode,
     )
     if residual:
         env = ResidualAlphaEnv(env, env_config=env_config)
@@ -75,16 +84,32 @@ def _make_vec_env(
     *,
     training: bool,
     residual: bool,
+    randomize_start: bool,
+    norm_reward: bool,
 ) -> VecNormalize:
     def _factory() -> MultiStockTradingEnv | ResidualAlphaEnv:
-        return build_env(features, alpha_wide, env_config, residual=residual)
+        return build_env(
+            features,
+            alpha_wide,
+            env_config,
+            residual=residual,
+            randomize_start=randomize_start,
+        )
 
     return VecNormalize(
         DummyVecEnv([_factory]),
         training=training,
         norm_obs=True,
-        norm_reward=training,
+        norm_reward=bool(norm_reward) and training,
     )
+
+
+def _load_vecnormalize(env: VecNormalize, path: Path) -> VecNormalize:
+    """Reload running stats saved with ``VecNormalize.save``."""
+    loaded = VecNormalize.load(str(path), env.venv)
+    loaded.training = False
+    loaded.norm_reward = False
+    return loaded
 
 
 def _print_split_diagnostics(label: str, metrics: dict[str, float]) -> None:
@@ -96,6 +121,8 @@ def _print_split_diagnostics(label: str, metrics: dict[str, float]) -> None:
     print(
         f"{label}: mean_reward={metrics['mean_reward']:.6f}"
         f"{entropy}  "
+        f"log_ret={metrics.get('mean_log_return', float('nan')):.6f}  "
+        f"sharpe={metrics.get('sharpe_ratio', float('nan')):.2f}  "
         f"buy={metrics['action_share_buy']:.2f}  "
         f"hold={metrics['action_share_hold']:.2f}  "
         f"sell={metrics['action_share_sell']:.2f}"
@@ -103,18 +130,28 @@ def _print_split_diagnostics(label: str, metrics: dict[str, float]) -> None:
 
 
 def _alpha_feature_set_name(alpha_model) -> str:
-    from models.alpha.config import ENGINEERED_FEATURE_COLUMNS
+    from models.alpha.config import infer_feature_flags, feature_set_name_for
 
-    uses_fundamentals = any(
-        name not in ENGINEERED_FEATURE_COLUMNS for name in alpha_model.feature_names
-    )
-    return "with_fundamentals" if uses_fundamentals else "market_only"
+    include_fundamentals, use_levels = infer_feature_flags(alpha_model.feature_names)
+    return feature_set_name_for(include_fundamentals, use_levels)
 
 
 def _save_metrics(metrics: dict, feature_set: str) -> None:
     eval_dir = Path("eval")
     eval_dir.mkdir(parents=True, exist_ok=True)
-    suffix = "" if feature_set == "with_fundamentals" else "_market_only"
+    parts: list[str] = []
+    if feature_set == "market_only":
+        parts.append("market_only")
+    elif feature_set == "fundamentals_no_levels":
+        parts.append("no_levels")
+    rebalance_every = int(metrics.get("rebalance_every", 1))
+    if rebalance_every != 1:
+        parts.append(f"{rebalance_every}d")
+    if metrics.get("allow_short"):
+        parts.append("ls")
+    if float(metrics.get("keep_coef", 1.0)) == 0.0 and float(metrics.get("keep_bias", 1.0)) == 0.0:
+        parts.append("noprior")
+    suffix = ("_" + "_".join(parts)) if parts else ""
     metrics_path = eval_dir / f"ppo_training_metrics{suffix}.json"
     with metrics_path.open("w", encoding="utf-8") as metrics_file:
         json.dump(metrics, metrics_file, indent=2)
@@ -161,6 +198,12 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
         f"z_threshold={config.env.rule_z_threshold}  "
         f"cost_multiple={config.env.rule_cost_multiple}"
     )
+    print(
+        f"episode window: {config.env.episode_window}  "
+        f"randomize_start={config.env.randomize_start}  "
+        f"norm_reward={config.norm_reward}  "
+        f"keep_coef={config.keep_coef}  keep_bias={config.keep_bias}"
+    )
     if config.alpha_scores_path is None:
         train_alpha = predict_alpha_wide(alpha_model, train_wide)
     else:
@@ -170,7 +213,10 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
     train_days = int(train_features["date"].nunique())
     validation_days = int(validation_features["date"].nunique())
     n_stocks = int(train_features["symbol"].nunique())
-    steps_per_episode = episode_length(train_days)
+    if config.env.randomize_start and config.env.episode_window:
+        steps_per_episode = int(config.env.episode_window)
+    else:
+        steps_per_episode = episode_length(train_days)
     data_passes = (
         config.timesteps / steps_per_episode if steps_per_episode else float("inf")
     )
@@ -193,12 +239,15 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
     _print_split_diagnostics("rule val", rule_val)
 
     check_env(build_env(train_features, train_alpha, config.env, residual=residual))
+    randomize_train = bool(config.env.randomize_start)
     env = _make_vec_env(
         train_features,
         train_alpha,
         config.env,
         training=True,
         residual=residual,
+        randomize_start=randomize_train,
+        norm_reward=config.norm_reward,
     )
     eval_env = _make_vec_env(
         validation_features,
@@ -206,26 +255,25 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
         config.env,
         training=False,
         residual=residual,
+        randomize_start=False,
+        norm_reward=False,
     )
 
     config.artifact_dir.mkdir(parents=True, exist_ok=True)
-    stop_callback = StopTrainingOnNoModelImprovement(
-        max_no_improvement_evals=config.early_stop_patience,
-        min_evals=3,
+    eval_callback = UnshapedEvalCallback(
+        eval_env,
+        eval_freq=max(config.eval_freq_steps, 1),
+        patience=config.early_stop_patience,
+        save_path=config.artifact_dir,
+        residual=residual,
         verbose=1,
     )
-    eval_callback = EvalCallback(
-        eval_env,
-        best_model_save_path=str(config.artifact_dir),
-        log_path=str(config.artifact_dir),
-        eval_freq=max(config.eval_freq_steps, 1),
-        n_eval_episodes=1,
-        deterministic=True,
-        render=False,
-        callback_after_eval=stop_callback,
-    )
 
-    ppo = PPO(
+    algo = KeepRegularizedPPO if residual else PPO
+    algo_kwargs = {}
+    if residual:
+        algo_kwargs["keep_coef"] = config.keep_coef
+    ppo = algo(
         "MlpPolicy",
         env,
         seed=config.seed,
@@ -239,6 +287,7 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
         gamma=config.ppo.gamma,
         gae_lambda=config.ppo.gae_lambda,
         max_grad_norm=config.ppo.max_grad_norm,
+        **algo_kwargs,
     )
 
     imitation_metrics: dict[str, float] = {}
@@ -266,13 +315,19 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
             f"n={int(imitation_metrics['imitation_samples'])}"
         )
 
+    if residual:
+        init_keep_logit_bias(ppo, config.keep_bias)
+
     ppo.learn(total_timesteps=config.timesteps, callback=eval_callback)
 
     env.training = False
     env.norm_reward = False
 
     best_model_path = config.artifact_dir / "best_model.zip"
+    best_vec_path = config.artifact_dir / "best_vecnormalize.pkl"
     if best_model_path.exists():
+        if best_vec_path.exists():
+            env = _load_vecnormalize(env, best_vec_path)
         ppo = PPO.load(str(best_model_path), env=env)
         print(f"loaded best validation checkpoint from {best_model_path}")
 
@@ -296,6 +351,8 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
         config.env,
         training=False,
         residual=residual,
+        randomize_start=False,
+        norm_reward=False,
     )
     validation_env.obs_rms = env.obs_rms
     validation_metrics = rollout_diagnostics(
@@ -313,6 +370,15 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
     )
     equal_weight = equal_weight_mean_log_return(validation_panel)
     print(f"val equal-weight mean log return: {equal_weight:.6f}")
+
+    rule_sharpe = float(rule_val.get("sharpe_ratio", 0.0))
+    ppo_sharpe = float(validation_metrics.get("sharpe_ratio", 0.0))
+    ppo_beats_rule = ppo_sharpe > rule_sharpe
+    selected_policy = "ppo" if ppo_beats_rule else "rule"
+    print(
+        f"selected policy: {selected_policy}  "
+        f"(ppo sharpe={ppo_sharpe:.3f} vs rule {rule_sharpe:.3f})"
+    )
 
     _save_metrics(
         {
@@ -332,6 +398,15 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
             "rule_mode": config.env.rule_mode,
             "rule_z_threshold": config.env.rule_z_threshold,
             "rule_cost_multiple": config.env.rule_cost_multiple,
+            "episode_window": config.env.episode_window,
+            "randomize_start": config.env.randomize_start,
+            "norm_reward": config.norm_reward,
+            "keep_coef": config.keep_coef,
+            "keep_bias": config.keep_bias,
+            "rebalance_every": config.env.rebalance_every,
+            "allow_short": config.env.allow_short,
+            "rebalance_mode": config.env.rebalance_mode,
+            "min_holding_days": config.env.min_holding_days,
             "imitation": imitation_metrics,
             "alpha_feature_set": feature_set,
             "alpha_model_dir": str(config.alpha_model_dir),
@@ -340,6 +415,8 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
             "train": train_metrics,
             "validation": validation_metrics,
             "validation_equal_weight_mean_log_return": equal_weight,
+            "ppo_beats_rule_validation": ppo_beats_rule,
+            "selected_policy": selected_policy,
         },
         feature_set=feature_set,
     )

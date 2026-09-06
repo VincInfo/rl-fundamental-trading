@@ -31,8 +31,14 @@ dist/
 # Trained model artifacts
 models/alpha/artifacts/*
 !models/alpha/artifacts/.gitkeep
+models/alpha/artifacts_no_levels/*
+!models/alpha/artifacts_no_levels/.gitkeep
 models/ppo/artifacts/*
 !models/ppo/artifacts/.gitkeep
+models/ppo/artifacts_20d_noprior/*
+!models/ppo/artifacts_20d_noprior/.gitkeep
+models/ppo/artifacts_market_20d/*
+!models/ppo/artifacts_market_20d/.gitkeep
 
 # Notebook cache (pickled pipeline output)
 **/.cache/

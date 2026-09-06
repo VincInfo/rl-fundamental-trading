@@ -5,7 +5,9 @@ from typing import Sequence
 
 DEFAULT_ARTIFACT_DIR = Path("models/alpha/artifacts")
 DEFAULT_MARKET_ARTIFACT_DIR = Path("models/alpha/artifacts_market")
+DEFAULT_NO_LEVELS_ARTIFACT_DIR = Path("models/alpha/artifacts_no_levels")
 TARGET_COLUMN = "target_return"
+FEATURE_SETS = ("market", "no_levels", "full")
 
 # Shared VANILLA market baseline: derived from OHLCV (not pipeline indicators).
 ENGINEERED_FEATURE_COLUMNS = (
@@ -59,11 +61,13 @@ CHANGE_FEATURE_COLUMNS = tuple(
     for column in FUNDAMENTAL_LEVEL_COLUMNS + FUNDAMENTAL_FLOW_COLUMNS
 )
 
-RANK_FEATURE_COLUMNS = tuple(
+RANK_LEVEL_FEATURE_COLUMNS = tuple(
     f"rank_{column}" for column in FUNDAMENTAL_LEVEL_COLUMNS
-) + tuple(
+)
+RANK_DELTA_FLOW_FEATURE_COLUMNS = tuple(
     f"rank_delta_{column}" for column in FUNDAMENTAL_FLOW_COLUMNS
 )
+RANK_FEATURE_COLUMNS = RANK_LEVEL_FEATURE_COLUMNS + RANK_DELTA_FLOW_FEATURE_COLUMNS
 
 # Columns copied from the pipeline wide frame (levels + flows + recency).
 FUNDAMENTAL_FEATURE_COLUMNS = (
@@ -82,12 +86,67 @@ MODEL_FEATURE_COLUMNS = (
 
 MARKET_FEATURE_COLUMNS = ENGINEERED_FEATURE_COLUMNS
 
+# Fundamentals without sticky accounting *levels* (and their ranks).
+NO_LEVEL_FEATURE_COLUMNS = (
+    ENGINEERED_FEATURE_COLUMNS
+    + CONTEXT_FEATURE_COLUMNS
+    + EVENT_FEATURE_COLUMNS
+    + CHANGE_FEATURE_COLUMNS
+    + RANK_DELTA_FLOW_FEATURE_COLUMNS
+)
 
-def feature_columns_for(include_fundamentals: bool) -> tuple[str, ...]:
-    """Return Alpha model inputs for the with/without-fundamentals ablation."""
-    if include_fundamentals:
+
+def feature_columns_for(
+    include_fundamentals: bool,
+    *,
+    use_fundamental_levels: bool = True,
+) -> tuple[str, ...]:
+    """Return Alpha model inputs for the market / no-levels / full ablation."""
+    if not include_fundamentals:
+        return MARKET_FEATURE_COLUMNS
+    if use_fundamental_levels:
         return MODEL_FEATURE_COLUMNS
-    return MARKET_FEATURE_COLUMNS
+    return NO_LEVEL_FEATURE_COLUMNS
+
+
+def feature_set_name_for(
+    include_fundamentals: bool,
+    use_fundamental_levels: bool = True,
+) -> str:
+    if not include_fundamentals:
+        return "market_only"
+    if not use_fundamental_levels:
+        return "fundamentals_no_levels"
+    return "with_fundamentals"
+
+
+def infer_feature_flags(feature_names: Sequence[str]) -> tuple[bool, bool]:
+    """Infer ``(include_fundamentals, use_fundamental_levels)`` from saved names."""
+    names = set(feature_names)
+    include_fundamentals = any(name not in ENGINEERED_FEATURE_COLUMNS for name in names)
+    sticky_levels = set(FUNDAMENTAL_LEVEL_COLUMNS) | set(RANK_LEVEL_FEATURE_COLUMNS)
+    use_fundamental_levels = any(name in sticky_levels for name in names)
+    return include_fundamentals, use_fundamental_levels
+
+
+def artifact_dir_for_feature_set(feature_set: str) -> Path:
+    if feature_set == "market":
+        return DEFAULT_MARKET_ARTIFACT_DIR
+    if feature_set == "no_levels":
+        return DEFAULT_NO_LEVELS_ARTIFACT_DIR
+    if feature_set == "full":
+        return DEFAULT_ARTIFACT_DIR
+    raise ValueError(f"Unknown feature_set={feature_set!r}; expected {FEATURE_SETS}.")
+
+
+def flags_for_feature_set(feature_set: str) -> tuple[bool, bool]:
+    if feature_set == "market":
+        return False, False
+    if feature_set == "no_levels":
+        return True, False
+    if feature_set == "full":
+        return True, True
+    raise ValueError(f"Unknown feature_set={feature_set!r}; expected {FEATURE_SETS}.")
 
 
 @dataclass
@@ -100,16 +159,32 @@ class TrainingConfig:
     sample_daily: bool = True
     # Primary ablation switch: same data, market features only vs + fundamentals.
     include_fundamentals: bool = True
+    # If False with fundamentals on, drop sticky level/rank-level columns.
+    use_fundamental_levels: bool = True
     # Predict out/underperformance vs cross-sectional mean (market-neutral target).
     active_return: bool = True
 
     @property
     def feature_columns(self) -> tuple[str, ...]:
-        return feature_columns_for(self.include_fundamentals)
+        return feature_columns_for(
+            self.include_fundamentals,
+            use_fundamental_levels=self.use_fundamental_levels,
+        )
 
     @property
     def feature_set_name(self) -> str:
-        return "with_fundamentals" if self.include_fundamentals else "market_only"
+        return feature_set_name_for(
+            self.include_fundamentals,
+            self.use_fundamental_levels,
+        )
+
+    @property
+    def feature_set_key(self) -> str:
+        if not self.include_fundamentals:
+            return "market"
+        if not self.use_fundamental_levels:
+            return "no_levels"
+        return "full"
 
 
 @dataclass

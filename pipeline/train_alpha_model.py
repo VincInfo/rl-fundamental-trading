@@ -7,9 +7,10 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from models.alpha.config import (
-    DEFAULT_ARTIFACT_DIR,
-    DEFAULT_MARKET_ARTIFACT_DIR,
+    FEATURE_SETS,
     TrainingConfig,
+    artifact_dir_for_feature_set,
+    flags_for_feature_set,
 )
 from models.alpha.training import train_alpha_model
 
@@ -28,31 +29,45 @@ def parse_args() -> argparse.Namespace:
         help="Use raw forward returns instead of cross-sectional active returns.",
     )
     parser.add_argument(
+        "--feature-set",
+        choices=FEATURE_SETS,
+        default=None,
+        help="market = vanilla OHLCV; no_levels = fundamentals without sticky levels; full = all.",
+    )
+    parser.add_argument(
         "--no-fundamentals",
         action="store_true",
-        help="Ablation: train on market features only (no fundamental inputs).",
+        help="Ablation alias for --feature-set market.",
+    )
+    parser.add_argument(
+        "--no-fundamental-levels",
+        action="store_true",
+        help="Ablation alias for --feature-set no_levels (keep deltas/filings, drop ROE/margin levels).",
     )
     parser.add_argument(
         "--output",
         type=Path,
         default=None,
-        help=(
-            "Directory for the trained model artifact. "
-            f"Default: {DEFAULT_ARTIFACT_DIR} with fundamentals, "
-            f"{DEFAULT_MARKET_ARTIFACT_DIR} without."
-        ),
+        help="Directory for the trained model artifact. Default depends on --feature-set.",
     )
     return parser.parse_args()
 
 
+def resolve_feature_set(args: argparse.Namespace) -> str:
+    if args.feature_set is not None:
+        return args.feature_set
+    if args.no_fundamentals:
+        return "market"
+    if args.no_fundamental_levels:
+        return "no_levels"
+    return "full"
+
+
 def main() -> None:
     args = parse_args()
-    include_fundamentals = not args.no_fundamentals
-    output = args.output
-    if output is None:
-        output = (
-            DEFAULT_ARTIFACT_DIR if include_fundamentals else DEFAULT_MARKET_ARTIFACT_DIR
-        )
+    feature_set = resolve_feature_set(args)
+    include_fundamentals, use_levels = flags_for_feature_set(feature_set)
+    output = args.output or artifact_dir_for_feature_set(feature_set)
     defaults = TrainingConfig()
     config = TrainingConfig(
         horizon_trading_days=(
@@ -62,6 +77,7 @@ def main() -> None:
         ),
         artifact_dir=output,
         include_fundamentals=include_fundamentals,
+        use_fundamental_levels=use_levels,
         active_return=not args.absolute_return,
     )
     train_alpha_model(training_config=config)

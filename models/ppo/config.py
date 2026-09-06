@@ -6,6 +6,8 @@ from models.alpha.config import DEFAULT_ARTIFACT_DIR as DEFAULT_ALPHA_ARTIFACT_D
 
 DEFAULT_ARTIFACT_DIR = Path("models/ppo/artifacts")
 DEFAULT_MARKET_ARTIFACT_DIR = Path("models/ppo/artifacts_market")
+DEFAULT_HORIZON_ARTIFACT_DIR = Path("models/ppo/artifacts_20d")
+DEFAULT_MARKET_HORIZON_ARTIFACT_DIR = Path("models/ppo/artifacts_market_20d")
 
 
 @dataclass
@@ -29,6 +31,17 @@ class EnvConfig:
     # Used only when rule_mode == "quantile".
     rule_buy_fraction: float = 0.3
     rule_sell_fraction: float = 0.3
+    # Training episodes are random slices of this many steps (None = full panel).
+    episode_window: int | None = 80
+    randomize_start: bool = True
+    # 1 = trade every day; 20 matches the alpha forecast horizon.
+    rebalance_every: int = 1
+    # If True, SELL can open a short (negative weight) instead of only exiting longs.
+    allow_short: bool = False
+    # Cap on sum(|weights|). Default: 1.0 long-only, 2.0 long/short (100/100).
+    max_gross_exposure: float | None = None
+    # "incremental" = PPO-style deltas; "snapshot" = set target book from actions.
+    rebalance_mode: str = "incremental"
 
 
 @dataclass
@@ -57,8 +70,14 @@ class TrainingConfig:
     early_stop_patience: int = 8
     # Warm-start by cloning the alpha rule (residual "keep") before PPO fine-tuning.
     use_residual_actions: bool = True
-    imitation_episodes: int = 3
+    imitation_episodes: int = 1
     imitation_epochs: int = 40
     imitation_batch_size: int = 256
+    # Extra KEEP logit bias after init / BC so the residual prior stays near the rule.
+    keep_bias: float = 1.5
+    # Behavioral-cloning KEEP loss applied on each PPO rollout (0 disables).
+    keep_coef: float = 0.08
+    # Observation normalization only; keep PnL and costs in the same units.
+    norm_reward: bool = False
     env: EnvConfig = field(default_factory=EnvConfig)
     ppo: PpoConfig = field(default_factory=PpoConfig)

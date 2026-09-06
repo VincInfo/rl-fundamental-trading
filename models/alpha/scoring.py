@@ -6,8 +6,8 @@ import pandas as pd
 
 from models.alpha.config import (
     DEFAULT_ARTIFACT_DIR,
-    ENGINEERED_FEATURE_COLUMNS,
     TrainingConfig,
+    infer_feature_flags,
 )
 from models.alpha.features import build_inference_features
 from models.alpha.xgboost_model import XGBoostModel
@@ -17,23 +17,23 @@ def training_config_for_model(
     model: XGBoostModel,
     config: TrainingConfig | None = None,
 ) -> TrainingConfig:
-    """Match feature ablation to the trained model (market-only vs + fundamentals)."""
-    uses_fundamentals = any(
-        name not in ENGINEERED_FEATURE_COLUMNS for name in model.feature_names
-    )
+    """Match feature ablation to the trained model (market / no-levels / full)."""
+    include_fundamentals, use_levels = infer_feature_flags(model.feature_names)
     if config is None:
-        return TrainingConfig(include_fundamentals=uses_fundamentals)
-    if config.include_fundamentals != uses_fundamentals:
         return TrainingConfig(
-            horizon_trading_days=config.horizon_trading_days,
-            bars_per_trading_day=config.bars_per_trading_day,
-            target_column=config.target_column,
-            artifact_dir=config.artifact_dir,
-            sample_daily=config.sample_daily,
-            include_fundamentals=uses_fundamentals,
-            active_return=config.active_return,
+            include_fundamentals=include_fundamentals,
+            use_fundamental_levels=use_levels,
         )
-    return config
+    return TrainingConfig(
+        horizon_trading_days=config.horizon_trading_days,
+        bars_per_trading_day=config.bars_per_trading_day,
+        target_column=config.target_column,
+        artifact_dir=config.artifact_dir,
+        sample_daily=config.sample_daily,
+        include_fundamentals=include_fundamentals,
+        use_fundamental_levels=use_levels,
+        active_return=config.active_return,
+    )
 
 
 def scores_to_wide(scores: pd.Series) -> pd.DataFrame:

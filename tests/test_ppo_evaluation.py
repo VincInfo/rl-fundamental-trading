@@ -114,3 +114,43 @@ def test_residual_env_passes_checker_and_keeps_rule_by_default():
     _, _, _, _, info = env.step(residual)
     assert info["residual_action"] == residual.tolist()
     assert info["final_action"] == info["rule_action"]
+    assert obs.shape == (ResidualAlphaEnv.observation_dim(base.n_stocks),)
+
+
+def test_residual_observation_appends_signed_rule_action():
+    features = make_synthetic_features(n_stocks=4, n_days=80, seed=5)
+    alpha = _random_alpha_wide(features, seed=5)
+    panel = build_panel(features, alpha, vol_window=10)
+    base = MultiStockTradingEnv(panel, min_holding_days=2)
+    env = ResidualAlphaEnv(base)
+    obs, info = env.reset(seed=0)
+    rule = np.asarray(info["rule_action"], dtype=np.float64)
+    assert obs.shape[-1] == ResidualAlphaEnv.observation_dim(base.n_stocks)
+    np.testing.assert_allclose(obs[-base.n_stocks :], rule - 1.0)
+
+
+def test_init_keep_logit_bias_shifts_keep_channel():
+    import torch
+    from torch import nn
+
+    from models.ppo.callbacks import init_keep_logit_bias
+
+    class _Space:
+        nvec = np.array([3, 3, 3, 3])
+
+    class _Policy:
+        def __init__(self) -> None:
+            self.action_net = nn.Linear(8, 12)
+            nn.init.zeros_(self.action_net.bias)
+
+    class _Model:
+        def __init__(self) -> None:
+            self.policy = _Policy()
+            self.action_space = _Space()
+
+    model = _Model()
+    init_keep_logit_bias(model, keep_bias=2.0)  # type: ignore[arg-type]
+    keep = model.policy.action_net.bias.detach().view(4, 3)[:, RESIDUAL_KEEP]
+    down = model.policy.action_net.bias.detach().view(4, 3)[:, RESIDUAL_DOWN]
+    assert torch.allclose(keep, torch.full((4,), 2.0))
+    assert torch.allclose(down, torch.zeros(4))

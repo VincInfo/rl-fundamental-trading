@@ -2,8 +2,11 @@ import pandas as pd
 import pytest
 
 from models.alpha.config import (
+    FUNDAMENTAL_LEVEL_COLUMNS,
     MARKET_FEATURE_COLUMNS,
     MODEL_FEATURE_COLUMNS,
+    NO_LEVEL_FEATURE_COLUMNS,
+    RANK_LEVEL_FEATURE_COLUMNS,
     TARGET_COLUMN,
     TrainingConfig,
 )
@@ -68,12 +71,17 @@ def _synthetic_wide_frame(
     return values
 
 
-def _training_config(*, include_fundamentals: bool = True) -> TrainingConfig:
+def _training_config(
+    *,
+    include_fundamentals: bool = True,
+    use_fundamental_levels: bool = True,
+) -> TrainingConfig:
     return TrainingConfig(
         horizon_trading_days=5,
         bars_per_trading_day=7,
         sample_daily=True,
         include_fundamentals=include_fundamentals,
+        use_fundamental_levels=use_fundamental_levels,
         active_return=True,
     )
 
@@ -104,6 +112,22 @@ def test_build_dataset_market_only_excludes_fundamentals():
     )
     assert not dataset.empty
     assert dataset[["oc_return", "hl_range", "rel_volume_20d"]].notna().all().all()
+
+
+def test_build_dataset_no_levels_keeps_deltas_drops_sticky_levels():
+    tickers = ["AAPL", "MSFT"]
+    wide_frame = _synthetic_wide_frame(rows=300, tickers=tickers)
+    dataset = build_dataset(
+        wide_frame,
+        _training_config(include_fundamentals=True, use_fundamental_levels=False),
+    )
+
+    assert list(dataset.columns) == list(NO_LEVEL_FEATURE_COLUMNS) + ["target_return"]
+    for column in FUNDAMENTAL_LEVEL_COLUMNS + RANK_LEVEL_FEATURE_COLUMNS:
+        assert column not in dataset.columns
+    assert {"delta_roe", "rank_delta_revenue", "filing_recency", "post_filing_5d"} <= set(
+        dataset.columns
+    )
 
 
 def test_build_dataset_requires_vanilla_ohlcv():

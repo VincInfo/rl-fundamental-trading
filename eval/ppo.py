@@ -231,7 +231,7 @@ def _run_rollout(
     env: VecNormalize,
     *,
     residual: bool = False,
-) -> tuple[pd.DataFrame, list[float], list[np.ndarray], list[float], list[np.ndarray]]:
+) -> tuple[pd.DataFrame, list[float], list[np.ndarray], list[float], list[np.ndarray], list[float]]:
     """Run one deterministic episode and retain portfolio-level observations."""
     from models.ppo.residual import compose_residual_actions
 
@@ -239,18 +239,21 @@ def _run_rollout(
     initial_cash = float(env.get_attr("initial_cash")[0])
     panel = env.get_attr("panel")[0]
     n_stocks = int(env.get_attr("n_stocks")[0])
+    start_index = int(env.get_attr("current_index")[0])
     records: list[dict[str, object]] = [
         {
-            "date": panel.dates[1],
+            "date": panel.dates[start_index],
             "portfolio_value": initial_cash,
             "cash": initial_cash,
             "turnover": 0.0,
             "transaction_cost": 0.0,
             "reward": 0.0,
+            "log_return": 0.0,
             "action": [HOLD] * n_stocks,
         }
     ]
     rewards: list[float] = []
+    log_returns: list[float] = []
     collected_actions: list[np.ndarray] = []
     collected_residuals: list[np.ndarray] = []
     entropies: list[float] = []
@@ -270,6 +273,7 @@ def _run_rollout(
         obs, reward, dones, infos = env.step(action)
         rewards.append(float(reward[0]))
         info = infos[0]
+        log_returns.append(float(info.get("log_return", 0.0)))
         records.append(
             {
                 "date": info["date"],
@@ -278,6 +282,7 @@ def _run_rollout(
                 "turnover": info["turnover"],
                 "transaction_cost": info["transaction_cost"],
                 "reward": rewards[-1],
+                "log_return": log_returns[-1],
                 "action": info["action"],
             }
         )
@@ -285,7 +290,7 @@ def _run_rollout(
 
     ledger = pd.DataFrame(records)
     ledger["daily_return"] = ledger["portfolio_value"].pct_change().fillna(0.0)
-    return ledger, rewards, collected_actions, entropies, collected_residuals
+    return ledger, rewards, collected_actions, entropies, collected_residuals, log_returns
 
 
 def collect_rollout(
@@ -312,8 +317,8 @@ def rollout_diagnostics(
     Buy/Hold/Sell trades (after composing residuals with the alpha rule), and
     residual keep/up/down shares are added separately.
     """
-    ledger, rewards, collected_actions, entropies, collected_residuals = _run_rollout(
-        model, env, residual=residual
+    ledger, rewards, collected_actions, entropies, collected_residuals, log_returns = (
+        _run_rollout(model, env, residual=residual)
     )
     if ledger_path is not None:
         path = Path(ledger_path)
@@ -321,6 +326,7 @@ def rollout_diagnostics(
         ledger.to_csv(path, index=False)
 
     metrics = _summarize_rollout(rewards, collected_actions, entropies)
+    metrics["mean_log_return"] = float(np.mean(log_returns)) if log_returns else 0.0
     metrics.update(portfolio_metrics(ledger))
     if residual and collected_residuals:
         residual_shares = action_shares(np.stack(collected_residuals, axis=0))
@@ -335,17 +341,49 @@ def rollout_fixed_policy(
     action_fn: Callable[[MultiStockTradingEnv], np.ndarray],
 ) -> dict[str, float]:
     """Run one episode with a deterministic action function on a raw env."""
-    env.reset()
+    _, info = env.reset()
+    n_stocks = env.n_stocks
+    records: list[dict[str, object]] = [
+        {
+            "date": env.panel.dates[env.current_index],
+            "portfolio_value": env.initial_cash,
+            "cash": env.initial_cash,
+            "turnover": 0.0,
+            "transaction_cost": 0.0,
+            "reward": 0.0,
+            "log_return": 0.0,
+            "action": [HOLD] * n_stocks,
+        }
+    ]
     rewards: list[float] = []
+    log_returns: list[float] = []
     collected_actions: list[np.ndarray] = []
     terminated = False
     truncated = False
     while not (terminated or truncated):
         action = np.asarray(action_fn(env), dtype=np.int64).reshape(-1)
         collected_actions.append(action)
-        _, reward, terminated, truncated, _ = env.step(action)
+        _, reward, terminated, truncated, info = env.step(action)
         rewards.append(float(reward))
-    return _summarize_rollout(rewards, collected_actions)
+        log_returns.append(float(info.get("log_return", 0.0)))
+        records.append(
+            {
+                "date": info["date"],
+                "portfolio_value": info["portfolio_value"],
+                "cash": info["cash"],
+                "turnover": info["turnover"],
+                "transaction_cost": info["transaction_cost"],
+                "reward": rewards[-1],
+                "log_return": log_returns[-1],
+                "action": info.get("action", action.tolist()),
+            }
+        )
+    ledger = pd.DataFrame(records)
+    ledger["daily_return"] = ledger["portfolio_value"].pct_change().fillna(0.0)
+    metrics = _summarize_rollout(rewards, collected_actions)
+    metrics["mean_log_return"] = float(np.mean(log_returns)) if log_returns else 0.0
+    metrics.update(portfolio_metrics(ledger))
+    return metrics
 
 
 def make_alpha_quantile_policy(
@@ -390,5 +428,66 @@ def make_alpha_rule_policy(
             min_abs_alpha=min_abs_alpha,
             eps=eps,
         )
+
+    return _policy
+
+
+def make_hybrid_rule_policy(
+    long_alpha_wide: pd.DataFrame,
+    short_alpha_wide: pd.DataFrame,
+    *,
+    rule_mode: str = "zscore",
+    z_threshold: float = 0.5,
+    buy_fraction: float = 0.3,
+    sell_fraction: float = 0.3,
+    transaction_cost_bps: float = 10.0,
+    rule_cost_multiple: float = 1.0,
+    eps: float = 1e-8,
+) -> Callable[[MultiStockTradingEnv], np.ndarray]:
+    """Buy from one alpha book, sell from another; conflicts become Hold."""
+    min_abs_alpha = cost_floor_from_bps(transaction_cost_bps, rule_cost_multiple)
+    aligned: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+
+    def _matrices(env: MultiStockTradingEnv) -> tuple[np.ndarray, np.ndarray]:
+        key = id(env.panel)
+        if key not in aligned:
+            dates = pd.Index(env.panel.dates)
+            symbols = list(env.panel.symbols)
+            long_mat = (
+                long_alpha_wide.reindex(index=dates, columns=symbols).fillna(0.0).to_numpy()
+            )
+            short_mat = (
+                short_alpha_wide.reindex(index=dates, columns=symbols).fillna(0.0).to_numpy()
+            )
+            aligned[key] = (long_mat, short_mat)
+        return aligned[key]
+
+    def _policy(env: MultiStockTradingEnv) -> np.ndarray:
+        long_mat, short_mat = _matrices(env)
+        t = env.current_index
+        buy_side = rule_actions_from_alpha(
+            long_mat[t],
+            rule_mode=rule_mode,
+            z_threshold=z_threshold,
+            buy_fraction=buy_fraction,
+            sell_fraction=sell_fraction,
+            min_abs_alpha=min_abs_alpha,
+            eps=eps,
+        )
+        sell_side = rule_actions_from_alpha(
+            short_mat[t],
+            rule_mode=rule_mode,
+            z_threshold=z_threshold,
+            buy_fraction=buy_fraction,
+            sell_fraction=sell_fraction,
+            min_abs_alpha=min_abs_alpha,
+            eps=eps,
+        )
+        actions = np.full(env.n_stocks, HOLD, dtype=np.int64)
+        actions[buy_side == BUY] = BUY
+        actions[sell_side == SELL] = SELL
+        conflict = (buy_side == BUY) & (sell_side == SELL)
+        actions[conflict] = HOLD
+        return actions
 
     return _policy
