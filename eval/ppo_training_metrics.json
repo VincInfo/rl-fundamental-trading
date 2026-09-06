@@ -7,14 +7,20 @@
   "train_window_passes": 709.2198581560284,
   "clip_range": 0.1,
   "n_epochs": 6,
-  "ent_coef": 0.005,
+  "ent_coef": 0.002,
   "learning_rate": 0.0001,
   "trade_penalty_bps": 10.0,
   "alpha_alignment_bps": 5.0,
+  "use_residual_actions": true,
+  "imitation": {
+    "imitation_loss": 15.887479782104492,
+    "imitation_accuracy": 0.7692307829856873,
+    "imitation_samples": 846.0
+  },
   "alpha_feature_set": "with_fundamentals",
   "alpha_model_dir": "models\\alpha\\artifacts",
   "rule_train": {
-    "mean_reward": 0.004417193450954913,
+    "mean_reward": 0.004416809629361433,
     "n_steps": 282,
     "action_share_sell": 0.3,
     "action_share_hold": 0.4,
@@ -28,22 +34,28 @@
     "action_share_buy": 0.3
   },
   "train": {
-    "mean_reward": 0.0033064710797389256,
+    "mean_reward": 0.0041053373629406035,
     "n_steps": 282,
-    "action_share_sell": 0.4014184397163121,
-    "action_share_hold": 0.2531914893617021,
-    "action_share_buy": 0.3453900709219858,
-    "mean_entropy": 21.86331378314512,
-    "max_entropy": 21.972245773362197
+    "action_share_sell": 0.3535460992907801,
+    "action_share_hold": 0.3432624113475177,
+    "action_share_buy": 0.30319148936170215,
+    "mean_entropy": 20.35260002663795,
+    "max_entropy": 21.972245773362197,
+    "residual_share_down": 0.2732269503546099,
+    "residual_share_keep": 0.5129432624113475,
+    "residual_share_up": 0.21382978723404256
   },
   "validation": {
-    "mean_reward": -0.0006543456125035982,
+    "mean_reward": -0.000229362367347076,
     "n_steps": 94,
-    "action_share_sell": 0.42340425531914894,
-    "action_share_hold": 0.249468085106383,
-    "action_share_buy": 0.3271276595744681,
-    "mean_entropy": 21.926601389621165,
-    "max_entropy": 21.972245773362197
+    "action_share_sell": 0.4186170212765957,
+    "action_share_hold": 0.28936170212765955,
+    "action_share_buy": 0.29202127659574467,
+    "mean_entropy": 21.21457073536325,
+    "max_entropy": 21.972245773362197,
+    "residual_share_down": 0.5914893617021276,
+    "residual_share_keep": 0.0,
+    "residual_share_up": 0.4085106382978723
   },
   "validation_equal_weight_mean_log_return": 0.00046562280519583547
 }

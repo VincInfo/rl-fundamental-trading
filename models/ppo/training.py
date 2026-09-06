@@ -12,12 +12,14 @@ from models.ppo.config import EnvConfig, TrainingConfig
 from eval.ppo import (
     episode_length,
     equal_weight_mean_log_return,
-    make_alpha_quantile_policy,
+    make_alpha_rule_policy,
     rollout_diagnostics,
     rollout_fixed_policy,
 )
 from models.ppo.features import build_market_features
+from models.ppo.imitation import behavioral_clone_policy, collect_vec_demonstrations
 from models.ppo.panel import build_panel
+from models.ppo.residual import ResidualAlphaEnv
 from models.ppo.trading_env import MultiStockTradingEnv
 
 try:
@@ -46,9 +48,11 @@ def build_env(
     features: pd.DataFrame,
     alpha_wide: pd.DataFrame,
     env_config: EnvConfig,
-) -> MultiStockTradingEnv:
+    *,
+    residual: bool = False,
+) -> MultiStockTradingEnv | ResidualAlphaEnv:
     panel = build_panel(features, alpha_wide, vol_window=env_config.vol_window)
-    return MultiStockTradingEnv(
+    env: MultiStockTradingEnv | ResidualAlphaEnv = MultiStockTradingEnv(
         panel,
         initial_cash=env_config.initial_cash,
         transaction_cost_bps=env_config.transaction_cost_bps,
@@ -59,6 +63,9 @@ def build_env(
         rebalance_budget=env_config.rebalance_budget,
         eps=env_config.eps,
     )
+    if residual:
+        env = ResidualAlphaEnv(env, env_config=env_config)
+    return env
 
 
 def _make_vec_env(
@@ -67,9 +74,10 @@ def _make_vec_env(
     env_config: EnvConfig,
     *,
     training: bool,
+    residual: bool,
 ) -> VecNormalize:
-    def _factory() -> MultiStockTradingEnv:
-        return build_env(features, alpha_wide, env_config)
+    def _factory() -> MultiStockTradingEnv | ResidualAlphaEnv:
+        return build_env(features, alpha_wide, env_config, residual=residual)
 
     return VecNormalize(
         DummyVecEnv([_factory]),
@@ -118,10 +126,17 @@ def _rule_baseline_metrics(
     alpha_wide: pd.DataFrame,
     env_config: EnvConfig,
 ) -> dict[str, float]:
-    env = build_env(features, alpha_wide, env_config)
-    policy = make_alpha_quantile_policy(
+    # Absolute rule on the raw trading env (not residual).
+    env = build_env(features, alpha_wide, env_config, residual=False)
+    assert isinstance(env, MultiStockTradingEnv)
+    policy = make_alpha_rule_policy(
+        rule_mode=env_config.rule_mode,
+        z_threshold=env_config.rule_z_threshold,
         buy_fraction=env_config.rule_buy_fraction,
         sell_fraction=env_config.rule_sell_fraction,
+        transaction_cost_bps=env_config.transaction_cost_bps,
+        rule_cost_multiple=env_config.rule_cost_multiple,
+        eps=env_config.eps,
     )
     return rollout_fixed_policy(env, policy)
 
@@ -129,6 +144,7 @@ def _rule_baseline_metrics(
 def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
     """End-to-end PPO training on pipeline market data and trained alpha scores."""
     config = training_config or TrainingConfig()
+    residual = config.use_residual_actions
     splits = load_splits()
 
     train_wide = splits[DataSplit.TRAIN]
@@ -139,6 +155,12 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
     alpha_model = load_trained_alpha_model(config.alpha_model_dir)
     feature_set = _alpha_feature_set_name(alpha_model)
     print(f"alpha feature set: {feature_set}")
+    print(f"residual actions: {residual}")
+    print(
+        f"rule mode: {config.env.rule_mode}  "
+        f"z_threshold={config.env.rule_z_threshold}  "
+        f"cost_multiple={config.env.rule_cost_multiple}"
+    )
     if config.alpha_scores_path is None:
         train_alpha = predict_alpha_wide(alpha_model, train_wide)
     else:
@@ -170,13 +192,20 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
     _print_split_diagnostics("rule train", rule_train)
     _print_split_diagnostics("rule val", rule_val)
 
-    check_env(build_env(train_features, train_alpha, config.env))
-    env = _make_vec_env(train_features, train_alpha, config.env, training=True)
+    check_env(build_env(train_features, train_alpha, config.env, residual=residual))
+    env = _make_vec_env(
+        train_features,
+        train_alpha,
+        config.env,
+        training=True,
+        residual=residual,
+    )
     eval_env = _make_vec_env(
         validation_features,
         validation_alpha,
         config.env,
         training=False,
+        residual=residual,
     )
 
     config.artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -211,6 +240,32 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
         gae_lambda=config.ppo.gae_lambda,
         max_grad_norm=config.ppo.max_grad_norm,
     )
+
+    imitation_metrics: dict[str, float] = {}
+    if config.imitation_epochs > 0 and residual:
+        print(
+            f"imitation warm-start: episodes={config.imitation_episodes}  "
+            f"epochs={config.imitation_epochs}"
+        )
+        demo_obs, demo_actions = collect_vec_demonstrations(
+            env,
+            n_episodes=config.imitation_episodes,
+            residual=True,
+        )
+        imitation_metrics = behavioral_clone_policy(
+            ppo,
+            demo_obs,
+            demo_actions,
+            epochs=config.imitation_epochs,
+            batch_size=config.imitation_batch_size,
+            learning_rate=max(config.ppo.learning_rate, 1e-4),
+        )
+        print(
+            f"imitation done: loss={imitation_metrics['imitation_loss']:.4f}  "
+            f"acc={imitation_metrics['imitation_accuracy']:.3f}  "
+            f"n={int(imitation_metrics['imitation_samples'])}"
+        )
+
     ppo.learn(total_timesteps=config.timesteps, callback=eval_callback)
 
     env.training = False
@@ -228,7 +283,10 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
     print(f"vecnormalize saved to {vecnormalize_path}")
 
     train_metrics = rollout_diagnostics(
-        ppo, env, ledger_path=Path("eval") / "ppo_train_portfolio.csv"
+        ppo,
+        env,
+        ledger_path=Path("eval") / "ppo_train_portfolio.csv",
+        residual=residual,
     )
     _print_split_diagnostics("train", train_metrics)
 
@@ -237,10 +295,14 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
         validation_alpha,
         config.env,
         training=False,
+        residual=residual,
     )
     validation_env.obs_rms = env.obs_rms
     validation_metrics = rollout_diagnostics(
-        ppo, validation_env, ledger_path=Path("eval") / "ppo_validation_portfolio.csv"
+        ppo,
+        validation_env,
+        ledger_path=Path("eval") / "ppo_validation_portfolio.csv",
+        residual=residual,
     )
     _print_split_diagnostics("val", validation_metrics)
 
@@ -266,6 +328,11 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
             "learning_rate": config.ppo.learning_rate,
             "trade_penalty_bps": config.env.trade_penalty_bps,
             "alpha_alignment_bps": config.env.alpha_alignment_bps,
+            "use_residual_actions": residual,
+            "rule_mode": config.env.rule_mode,
+            "rule_z_threshold": config.env.rule_z_threshold,
+            "rule_cost_multiple": config.env.rule_cost_multiple,
+            "imitation": imitation_metrics,
             "alpha_feature_set": feature_set,
             "alpha_model_dir": str(config.alpha_model_dir),
             "rule_train": rule_train,

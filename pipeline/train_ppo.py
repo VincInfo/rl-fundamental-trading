@@ -28,7 +28,22 @@ def parse_args() -> argparse.Namespace:
         help="PPO environment steps. 20_000 is only a smoke test; default is 200_000.",
     )
     parser.add_argument("--vol-window", type=int, default=20)
-    parser.add_argument("--min-holding-days", type=int, default=3)
+    parser.add_argument(
+        "--min-holding-days",
+        type=int,
+        default=None,
+        help="Minimum holding days before a sell is allowed (default: EnvConfig).",
+    )
+    parser.add_argument(
+        "--no-residual",
+        action="store_true",
+        help="Disable residual-around-rule actions (PPO chooses absolute Buy/Hold/Sell).",
+    )
+    parser.add_argument(
+        "--no-imitation",
+        action="store_true",
+        help="Skip behavioral-cloning warm-start before PPO fine-tuning.",
+    )
     parser.add_argument(
         "--no-fundamentals",
         action="store_true",
@@ -62,6 +77,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    defaults = TrainingConfig()
     if args.alpha_model is None:
         args.alpha_model = (
             DEFAULT_ALPHA_MARKET_ARTIFACT_DIR
@@ -74,16 +90,18 @@ def main() -> None:
             if args.no_fundamentals
             else DEFAULT_ARTIFACT_DIR
         )
+    env_kwargs = {"vol_window": args.vol_window}
+    if args.min_holding_days is not None:
+        env_kwargs["min_holding_days"] = args.min_holding_days
     config = TrainingConfig(
         timesteps=args.timesteps,
         seed=args.seed,
         alpha_model_dir=args.alpha_model,
         alpha_scores_path=args.alpha_scores,
         artifact_dir=args.output,
-        env=EnvConfig(
-            vol_window=args.vol_window,
-            min_holding_days=args.min_holding_days,
-        ),
+        use_residual_actions=not args.no_residual,
+        imitation_epochs=0 if args.no_imitation else defaults.imitation_epochs,
+        env=EnvConfig(**env_kwargs),
     )
     train_ppo_model(training_config=config)
 
