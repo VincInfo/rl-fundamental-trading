@@ -19,6 +19,12 @@ class MultiStockTradingEnvContinuous(MultiStockTradingEnv):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        # snapshot rebalancing maps discrete BUY/SELL codes; float actions never match those.
+        if self.rebalance_mode == "snapshot":
+            raise ValueError(
+                "rebalance_mode='snapshot' is not supported for continuous actions; "
+                "use 'incremental'."
+            )
         self.action_space = spaces.Box(
             low=-1.0,
             high=1.0,

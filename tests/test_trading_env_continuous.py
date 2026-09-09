@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 from stable_baselines3.common.env_checker import check_env
 
 from models.rl.panel import build_panel
@@ -25,6 +26,14 @@ def _make_env(n_stocks: int = 4, n_days: int = 200, seed: int = 7) -> MultiStock
 
 def test_env_passes_gymnasium_checker() -> None:
     check_env(_make_env())
+
+
+def test_snapshot_rebalance_mode_is_rejected() -> None:
+    features = make_synthetic_features(n_stocks=4, n_days=200, seed=7)
+    alpha_wide = _random_alpha_wide(features, seed=7)
+    panel = build_panel(features, alpha_wide, vol_window=20)
+    with pytest.raises(ValueError, match="snapshot"):
+        MultiStockTradingEnvContinuous(panel, rebalance_mode="snapshot")
 
 
 def test_observation_and_action_shapes() -> None:

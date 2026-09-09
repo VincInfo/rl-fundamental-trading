@@ -156,6 +156,7 @@ def main() -> None:
         env_kwargs.setdefault("rebalance_every", 20)
         env_kwargs.setdefault("rebalance_mode", "snapshot")
         env_kwargs.setdefault("min_holding_days", 0)
+    is_sac = args.algorithm == "sac"
     config = TrainingConfig(
         timesteps=args.timesteps,
         seed=args.seed,
@@ -163,10 +164,10 @@ def main() -> None:
         alpha_model_dir=args.alpha_model,
         alpha_scores_path=args.alpha_scores,
         artifact_dir=args.output,
-        use_residual_actions=not args.no_residual,
-        imitation_epochs=0 if args.no_imitation else defaults.imitation_epochs,
-        keep_bias=0.0 if args.no_keep_prior else defaults.keep_bias,
-        keep_coef=0.0 if args.no_keep_prior else defaults.keep_coef,
+        use_residual_actions=False if is_sac else not args.no_residual,
+        imitation_epochs=0 if (is_sac or args.no_imitation) else defaults.imitation_epochs,
+        keep_bias=0.0 if (is_sac or args.no_keep_prior) else defaults.keep_bias,
+        keep_coef=0.0 if (is_sac or args.no_keep_prior) else defaults.keep_coef,
         env=EnvConfig(**env_kwargs),
     )
     train_agent_model(training_config=config)
