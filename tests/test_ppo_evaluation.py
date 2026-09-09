@@ -2,15 +2,28 @@ import math
 
 import numpy as np
 import pandas as pd
+from stable_baselines3.common.env_checker import check_env
 
-from models.rl.evaluation import (
+from eval.ppo import (
     action_shares,
+    alpha_quantile_actions,
+    alpha_zscore_actions,
     episode_length,
     equal_weight_mean_log_return,
+    make_alpha_quantile_policy,
+    make_alpha_rule_policy,
+    rollout_fixed_policy,
 )
 from models.rl.panel import build_panel
+from models.rl.residual import (
+    RESIDUAL_DOWN,
+    RESIDUAL_KEEP,
+    RESIDUAL_UP,
+    ResidualAlphaEnv,
+    compose_residual_actions,
+)
 from models.rl.synthetic import make_synthetic_features
-from models.rl.envs import BUY, HOLD, SELL
+from models.rl.envs import BUY, HOLD, SELL, MultiStockTradingEnv
 
 
 def _random_alpha_wide(features: pd.DataFrame, seed: int) -> pd.DataFrame:
@@ -45,3 +58,99 @@ def test_equal_weight_mean_log_return_is_finite():
     panel = build_panel(features, alpha, vol_window=10)
     value = equal_weight_mean_log_return(panel)
     assert math.isfinite(value)
+
+
+def test_alpha_quantile_actions_buys_top_and_sells_bottom():
+    alpha = np.array([-0.3, 0.1, 0.4, -0.1, 0.0])
+    actions = alpha_quantile_actions(alpha, buy_fraction=0.4, sell_fraction=0.4)
+    assert actions[2] == BUY
+    assert actions[0] == SELL
+    assert HOLD in set(actions.tolist())
+
+
+def test_alpha_zscore_actions_uses_dead_zone_and_cost_floor():
+    alpha = np.array([-0.04, -0.01, 0.0, 0.01, 0.05])
+    actions = alpha_zscore_actions(alpha, z_threshold=0.5, min_abs_alpha=0.02)
+    assert actions[0] == SELL
+    assert actions[-1] == BUY
+    # Weak signals below the cost floor stay Hold even if extreme in-sample.
+    assert actions[1] == HOLD
+    assert actions[2] == HOLD
+    assert actions[3] == HOLD
+
+
+def test_rule_policy_rollout_is_finite():
+    features = make_synthetic_features(n_stocks=5, n_days=60, seed=4)
+    alpha = _random_alpha_wide(features, seed=4)
+    panel = build_panel(features, alpha, vol_window=10)
+    env = MultiStockTradingEnv(panel, min_holding_days=2)
+    metrics = rollout_fixed_policy(env, make_alpha_rule_policy())
+    assert metrics["n_steps"] > 0
+    assert math.isfinite(metrics["mean_reward"])
+
+
+def test_compose_residual_actions_keeps_and_shifts():
+    rule = np.array([SELL, HOLD, BUY], dtype=np.int64)
+    keep = np.array([RESIDUAL_KEEP, RESIDUAL_KEEP, RESIDUAL_KEEP], dtype=np.int64)
+    assert compose_residual_actions(rule, keep).tolist() == [SELL, HOLD, BUY]
+
+    down = np.array([RESIDUAL_DOWN, RESIDUAL_DOWN, RESIDUAL_DOWN], dtype=np.int64)
+    assert compose_residual_actions(rule, down).tolist() == [SELL, SELL, HOLD]
+
+    up = np.array([RESIDUAL_UP, RESIDUAL_UP, RESIDUAL_UP], dtype=np.int64)
+    assert compose_residual_actions(rule, up).tolist() == [HOLD, BUY, BUY]
+
+
+def test_residual_env_passes_checker_and_keeps_rule_by_default():
+    features = make_synthetic_features(n_stocks=4, n_days=80, seed=5)
+    alpha = _random_alpha_wide(features, seed=5)
+    panel = build_panel(features, alpha, vol_window=10)
+    base = MultiStockTradingEnv(panel, min_holding_days=2)
+    env = ResidualAlphaEnv(base)
+    check_env(env)
+
+    obs, _ = env.reset(seed=0)
+    residual = np.full(env.action_space.nvec.shape[0], RESIDUAL_KEEP, dtype=np.int64)
+    _, _, _, _, info = env.step(residual)
+    assert info["residual_action"] == residual.tolist()
+    assert info["final_action"] == info["rule_action"]
+    assert obs.shape == (ResidualAlphaEnv.observation_dim(base.n_stocks),)
+
+
+def test_residual_observation_appends_signed_rule_action():
+    features = make_synthetic_features(n_stocks=4, n_days=80, seed=5)
+    alpha = _random_alpha_wide(features, seed=5)
+    panel = build_panel(features, alpha, vol_window=10)
+    base = MultiStockTradingEnv(panel, min_holding_days=2)
+    env = ResidualAlphaEnv(base)
+    obs, info = env.reset(seed=0)
+    rule = np.asarray(info["rule_action"], dtype=np.float64)
+    assert obs.shape[-1] == ResidualAlphaEnv.observation_dim(base.n_stocks)
+    np.testing.assert_allclose(obs[-base.n_stocks :], rule - 1.0)
+
+
+def test_init_keep_logit_bias_shifts_keep_channel():
+    import torch
+    from torch import nn
+
+    from models.rl.callbacks import init_keep_logit_bias
+
+    class _Space:
+        nvec = np.array([3, 3, 3, 3])
+
+    class _Policy:
+        def __init__(self) -> None:
+            self.action_net = nn.Linear(8, 12)
+            nn.init.zeros_(self.action_net.bias)
+
+    class _Model:
+        def __init__(self) -> None:
+            self.policy = _Policy()
+            self.action_space = _Space()
+
+    model = _Model()
+    init_keep_logit_bias(model, keep_bias=2.0)  # type: ignore[arg-type]
+    keep = model.policy.action_net.bias.detach().view(4, 3)[:, RESIDUAL_KEEP]
+    down = model.policy.action_net.bias.detach().view(4, 3)[:, RESIDUAL_DOWN]
+    assert torch.allclose(keep, torch.full((4,), 2.0))
+    assert torch.allclose(down, torch.zeros(4))

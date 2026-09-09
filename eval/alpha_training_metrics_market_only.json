@@ -1,0 +1,19 @@
+{
+  "mse": 0.011446222877055665,
+  "ic": 0.15660147976863364,
+  "n_samples": 1120,
+  "include_fundamentals": false,
+  "feature_set": "market_only",
+  "feature_names": [
+    "return_1d",
+    "return_5d",
+    "momentum_20d",
+    "vol_20d",
+    "oc_return",
+    "hl_range",
+    "volume_change_1d",
+    "rel_volume_20d"
+  ],
+  "horizon_trading_days": 20,
+  "active_return": true
+}

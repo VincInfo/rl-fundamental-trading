@@ -234,9 +234,15 @@ Alle Strategien müssen auf exakt denselben Zeitpunkten, denselben Aktien und
 demselben Datenstand ausgewertet werden. Ein Vergleich gilt nur als fair, wenn
 keine Strategie einen längeren Zeitraum oder zusätzliche Informationen erhält.
 
-**Aktueller Stand:** derzeit sind Training und Validation
-vorhanden -> separater Test-Split + die finale Testauswertung sind noch
-nicht implementiert!
+**Aktueller Stand:** Der Datenzulieferer stellt bereits chronologische
+Training-, Validation- und Test-Splits bereit. Diese werden über
+`eval.data_splits.loader.load_evaluation_splits()` geladen und auf
+Vollständigkeit, Sortierung, Überschneidungen und ein einheitliches
+Spaltenschema geprüft.
+
+Die finale Testauswertung im Sinne eines vollständigen Portfolio-Backtests ist
+noch nicht implementiert. Die konkreten Zeiträume und Größen der gelieferten
+Splits sind in [data_splits/README.md](data_splits/README.md) dokumentiert.
 
 Die finale Testauswertung wird erst durchgeführt, nachdem Modellvarianten und
 Hyperparameter anhand von Training und Validation festgelegt wurden.
@@ -327,9 +333,16 @@ Positionsänderung übersetzt.
 Für die finale Evaluation wird der Agent deterministisch ausgeführt, damit der
 Testlauf reproduzierbar bleibt.
 
-**Noch nicht implementiert:** Die bestehende Auswertung erfasst bereits
-Aktionen und Rewards -> noch keine vollständige Equity-Kurve + nicht
-alle Portfolio-Metriken in einer mit den Baselines vergleichbaren Form
+Die PPO-Auswertung erfasst eine tägliche Portfolio-Zeitreihe mit
+Portfolio-Wert, Cash, Turnover, absoluten Transaktionskosten, Reward und
+Aktionen. Die gemeinsamen Portfolio-Metriken werden daraus berechnet. Die
+Train- und Validation-Ledger werden zusätzlich als
+`eval/ppo_train_portfolio.csv` beziehungsweise
+`eval/ppo_validation_portfolio.csv` gespeichert.
+
+**Noch nicht implementiert:** Die Baselines müssen noch dieselbe
+Portfolio- und Kostenlogik verwenden, damit sie direkt mit dem PPO-Agenten
+verglichen werden können.
 
 
 ## Einfluss des Alpha-Modells auf PPO

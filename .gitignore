@@ -28,11 +28,11 @@ dist/
 .DS_Store
 .vscode/
 
-# Trained model artifacts
-models/alpha/artifacts/*
-!models/alpha/artifacts/.gitkeep
-models/ppo/artifacts/*
-!models/ppo/artifacts/.gitkeep
+# Trained model artifacts (weights stay local; keep .gitkeep so dirs exist)
+models/alpha/artifacts*/*
+!models/alpha/artifacts*/.gitkeep
+models/ppo/artifacts*/*
+!models/ppo/artifacts*/.gitkeep
 
 # Notebook cache (pickled pipeline output)
 **/.cache/
