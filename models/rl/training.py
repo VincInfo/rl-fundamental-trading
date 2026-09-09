@@ -8,7 +8,18 @@ from data_pipeline import DataSplit
 
 from models.alpha.features import load_splits
 from models.alpha.scoring import load_trained_alpha_model, predict_alpha_wide
-from models.ppo.config import EnvConfig, TrainingConfig
+from models.rl.algorithms import (
+    build_ppo,
+    build_sac,
+    ppo_hyperparams,
+    sac_hyperparams,
+)
+from models.rl.config import Algorithm, EnvConfig, TrainingConfig
+from models.rl.envs import (
+    MultiStockTradingEnv,
+    MultiStockTradingEnvContinuous,
+)
+from models.rl.evaluation import diagnostics_for
 from eval.ppo import (
     episode_length,
     equal_weight_mean_log_return,
@@ -16,19 +27,19 @@ from eval.ppo import (
     rollout_diagnostics,
     rollout_fixed_policy,
 )
-from models.ppo.callbacks import (
+from models.rl.callbacks import (
     KeepRegularizedPPO,
     UnshapedEvalCallback,
     init_keep_logit_bias,
 )
-from models.ppo.features import build_market_features
-from models.ppo.imitation import behavioral_clone_policy, collect_vec_demonstrations
-from models.ppo.panel import build_panel
-from models.ppo.residual import ResidualAlphaEnv
-from models.ppo.trading_env import MultiStockTradingEnv
+from models.rl.features import build_market_features
+from models.rl.imitation import behavioral_clone_policy, collect_vec_demonstrations
+from models.rl.panel import build_panel
+from models.rl.residual import ResidualAlphaEnv
 
 try:
-    from stable_baselines3 import PPO
+    from stable_baselines3 import PPO, SAC
+    from stable_baselines3.common.base_class import BaseAlgorithm
     from stable_baselines3.common.env_checker import check_env
     from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 except ImportError as exc:  # pragma: no cover - klare Meldung falls RL-Extra fehlt
@@ -50,12 +61,16 @@ def build_env(
     alpha_wide: pd.DataFrame,
     env_config: EnvConfig,
     *,
+    algorithm: Algorithm = "ppo",
     residual: bool = False,
     randomize_start: bool = False,
 ) -> MultiStockTradingEnv | ResidualAlphaEnv:
     panel = build_panel(features, alpha_wide, vol_window=env_config.vol_window)
     window = env_config.episode_window if randomize_start else None
-    env: MultiStockTradingEnv | ResidualAlphaEnv = MultiStockTradingEnv(
+    env_cls = (
+        MultiStockTradingEnvContinuous if algorithm == "sac" else MultiStockTradingEnv
+    )
+    env: MultiStockTradingEnv | ResidualAlphaEnv = env_cls(
         panel,
         initial_cash=env_config.initial_cash,
         transaction_cost_bps=env_config.transaction_cost_bps,
@@ -82,16 +97,18 @@ def _make_vec_env(
     alpha_wide: pd.DataFrame,
     env_config: EnvConfig,
     *,
-    training: bool,
-    residual: bool,
-    randomize_start: bool,
-    norm_reward: bool,
+    algorithm: Algorithm = "ppo",
+    training: bool = True,
+    residual: bool = False,
+    randomize_start: bool = False,
+    norm_reward: bool = False,
 ) -> VecNormalize:
     def _factory() -> MultiStockTradingEnv | ResidualAlphaEnv:
         return build_env(
             features,
             alpha_wide,
             env_config,
+            algorithm=algorithm,
             residual=residual,
             randomize_start=randomize_start,
         )
@@ -113,19 +130,25 @@ def _load_vecnormalize(env: VecNormalize, path: Path) -> VecNormalize:
 
 
 def _print_split_diagnostics(label: str, metrics: dict[str, float]) -> None:
-    entropy = ""
+    reward = metrics["mean_reward"]
     if "mean_entropy" in metrics:
-        entropy = (
-            f"  entropy={metrics['mean_entropy']:.2f}/{metrics['max_entropy']:.2f}"
+        detail = (
+            f"entropy={metrics['mean_entropy']:.2f}/{metrics['max_entropy']:.2f}  "
         )
+    elif "action_mean_abs" in metrics:
+        detail = (
+            f"|a|={metrics.get('action_mean_abs', 0.0):.2f}  "
+            f"std={metrics.get('action_std', 0.0):.2f}  "
+        )
+    else:
+        detail = ""
     print(
-        f"{label}: mean_reward={metrics['mean_reward']:.6f}"
-        f"{entropy}  "
+        f"{label}: mean_reward={reward:.6f}  {detail}"
         f"log_ret={metrics.get('mean_log_return', float('nan')):.6f}  "
         f"sharpe={metrics.get('sharpe_ratio', float('nan')):.2f}  "
-        f"buy={metrics['action_share_buy']:.2f}  "
-        f"hold={metrics['action_share_hold']:.2f}  "
-        f"sell={metrics['action_share_sell']:.2f}"
+        f"buy={metrics.get('action_share_buy', 0.0):.2f}  "
+        f"hold={metrics.get('action_share_hold', 0.0):.2f}  "
+        f"sell={metrics.get('action_share_sell', 0.0):.2f}"
     )
 
 
@@ -136,26 +159,43 @@ def _alpha_feature_set_name(alpha_model) -> str:
     return feature_set_name_for(include_fundamentals, use_levels)
 
 
-def _save_metrics(metrics: dict, feature_set: str) -> None:
+def _save_metrics(metrics: dict, algorithm: Algorithm, feature_set: str = "") -> None:
     eval_dir = Path("eval")
     eval_dir.mkdir(parents=True, exist_ok=True)
-    parts: list[str] = []
-    if feature_set == "market_only":
-        parts.append("market_only")
-    elif feature_set == "fundamentals_no_levels":
-        parts.append("no_levels")
-    rebalance_every = int(metrics.get("rebalance_every", 1))
-    if rebalance_every != 1:
-        parts.append(f"{rebalance_every}d")
-    if metrics.get("allow_short"):
-        parts.append("ls")
-    if float(metrics.get("keep_coef", 1.0)) == 0.0 and float(metrics.get("keep_bias", 1.0)) == 0.0:
-        parts.append("noprior")
-    suffix = ("_" + "_".join(parts)) if parts else ""
-    metrics_path = eval_dir / f"ppo_training_metrics{suffix}.json"
+    if algorithm != "ppo":
+        metrics_path = eval_dir / f"{algorithm}_training_metrics.json"
+    else:
+        parts: list[str] = []
+        if feature_set == "market_only":
+            parts.append("market_only")
+        elif feature_set == "fundamentals_no_levels":
+            parts.append("no_levels")
+        rebalance_every = int(metrics.get("rebalance_every", 1))
+        if rebalance_every != 1:
+            parts.append(f"{rebalance_every}d")
+        if metrics.get("allow_short"):
+            parts.append("ls")
+        if float(metrics.get("keep_coef", 1.0)) == 0.0 and float(metrics.get("keep_bias", 1.0)) == 0.0:
+            parts.append("noprior")
+        suffix = ("_" + "_".join(parts)) if parts else ""
+        metrics_path = eval_dir / f"ppo_training_metrics{suffix}.json"
     with metrics_path.open("w", encoding="utf-8") as metrics_file:
         json.dump(metrics, metrics_file, indent=2)
     print(f"metrics saved to {metrics_path}")
+
+
+def _build_agent(algorithm: Algorithm, env: VecNormalize, config: TrainingConfig) -> BaseAlgorithm:
+    if algorithm == "ppo":
+        return build_ppo(env, config)
+    if algorithm == "sac":
+        return build_sac(env, config)
+    raise ValueError(f"Unbekannter Algorithmus: {algorithm}")
+
+
+def _algorithm_hyperparams(algorithm: Algorithm, config: TrainingConfig) -> dict:
+    if algorithm == "ppo":
+        return ppo_hyperparams(config)
+    return sac_hyperparams(config)
 
 
 def _rule_baseline_metrics(
@@ -178,9 +218,16 @@ def _rule_baseline_metrics(
     return rollout_fixed_policy(env, policy)
 
 
-def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
-    """End-to-end PPO training on pipeline market data and trained alpha scores."""
+def train_agent_model(training_config: TrainingConfig | None = None) -> BaseAlgorithm:
+    """Dispatch to the PPO or SAC training routine based on ``config.algorithm``."""
     config = training_config or TrainingConfig()
+    if config.algorithm == "sac":
+        return _train_sac_model(config)
+    return _train_ppo_model(config)
+
+
+def _train_ppo_model(config: TrainingConfig) -> PPO:
+    """End-to-end PPO training on pipeline market data and trained alpha scores."""
     residual = config.use_residual_actions
     splits = load_splits()
 
@@ -220,6 +267,7 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
     data_passes = (
         config.timesteps / steps_per_episode if steps_per_episode else float("inf")
     )
+    print("algorithm: ppo")
     print(
         f"train days: {train_days}  val days: {validation_days}  stocks: {n_stocks}"
     )
@@ -388,6 +436,7 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
             "n_stocks": n_stocks,
             "steps_per_episode": steps_per_episode,
             "train_window_passes": data_passes,
+            "algorithm": "ppo",
             "clip_range": config.ppo.clip_range,
             "n_epochs": config.ppo.n_epochs,
             "ent_coef": config.ppo.ent_coef,
@@ -418,14 +467,140 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
             "ppo_beats_rule_validation": ppo_beats_rule,
             "selected_policy": selected_policy,
         },
+        "ppo",
         feature_set=feature_set,
     )
 
     return ppo
 
 
+def _train_sac_model(config: TrainingConfig) -> SAC:
+    """End-to-end SAC training on pipeline market data and trained alpha scores."""
+    splits = load_splits()
+
+    train_wide = splits[DataSplit.TRAIN]
+    validation_wide = splits[DataSplit.VALIDATION]
+    train_features = build_market_features(train_wide)
+    validation_features = build_market_features(validation_wide)
+
+    alpha_model = load_trained_alpha_model(config.alpha_model_dir)
+    if config.alpha_scores_path is None:
+        train_alpha = predict_alpha_wide(alpha_model, train_wide)
+    else:
+        train_alpha = load_alpha_wide(config.alpha_scores_path)
+    validation_alpha = predict_alpha_wide(alpha_model, validation_wide)
+
+    train_days = int(train_features["date"].nunique())
+    validation_days = int(validation_features["date"].nunique())
+    n_stocks = int(train_features["symbol"].nunique())
+    steps_per_episode = episode_length(train_days)
+    data_passes = (
+        config.timesteps / steps_per_episode if steps_per_episode else float("inf")
+    )
+    print("algorithm: sac")
+    print(
+        f"train days: {train_days}  val days: {validation_days}  stocks: {n_stocks}"
+    )
+    print(
+        f"alpha scores train: {train_alpha.shape[0]} days x {train_alpha.shape[1]} stocks  "
+        f"val: {validation_alpha.shape[0]} days x {validation_alpha.shape[1]} stocks"
+    )
+    print(
+        f"timesteps: {config.timesteps}  "
+        f"episode length: {steps_per_episode}  "
+        f"~{data_passes:.0f} passes over the train window"
+    )
+
+    check_env(build_env(train_features, train_alpha, config.env, algorithm="sac"))
+    env = _make_vec_env(
+        train_features,
+        train_alpha,
+        config.env,
+        algorithm="sac",
+        training=True,
+    )
+
+    agent = _build_agent("sac", env, config)
+    agent.learn(total_timesteps=config.timesteps)
+
+    env.training = False
+    env.norm_reward = False
+
+    config.artifact_dir.mkdir(parents=True, exist_ok=True)
+    vecnormalize_path = config.artifact_dir / "vecnormalize.pkl"
+    env.save(str(vecnormalize_path))
+    agent_path = config.artifact_dir / "sac_agent"
+    agent.save(str(agent_path))
+    print(f"model saved to {agent_path}")
+    print(f"vecnormalize saved to {vecnormalize_path}")
+
+    train_metrics = diagnostics_for(agent, env)
+    _print_split_diagnostics("train", train_metrics)
+
+    validation_env = _make_vec_env(
+        validation_features,
+        validation_alpha,
+        config.env,
+        algorithm="sac",
+        training=False,
+    )
+    validation_env.obs_rms = env.obs_rms
+    validation_metrics = diagnostics_for(agent, validation_env)
+    _print_split_diagnostics("val", validation_metrics)
+
+    validation_panel = build_panel(
+        validation_features,
+        validation_alpha,
+        vol_window=config.env.vol_window,
+    )
+    equal_weight = equal_weight_mean_log_return(validation_panel)
+    print(f"val equal-weight mean log return: {equal_weight:.6f}")
+
+    _save_metrics(
+        {
+            "algorithm": "sac",
+            "timesteps": config.timesteps,
+            "train_days": train_days,
+            "val_days": validation_days,
+            "n_stocks": n_stocks,
+            "steps_per_episode": steps_per_episode,
+            "train_window_passes": data_passes,
+            "hyperparams": _algorithm_hyperparams("sac", config),
+            "train": train_metrics,
+            "validation": validation_metrics,
+            "validation_equal_weight_mean_log_return": equal_weight,
+        },
+        "sac",
+    )
+
+    return agent
+
+
+def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
+    """Backward-compatible wrapper that forces the PPO algorithm."""
+    config = training_config or TrainingConfig()
+    if config.algorithm != "ppo":
+        config = replace_algorithm(config, "ppo")
+    return train_agent_model(config)  # type: ignore[return-value]
+
+
+def train_sac_model(training_config: TrainingConfig | None = None) -> SAC:
+    """Train a SAC agent using the same pipeline as PPO."""
+    config = training_config or TrainingConfig()
+    if config.algorithm != "sac":
+        config = replace_algorithm(config, "sac")
+    return train_agent_model(config)  # type: ignore[return-value]
+
+
+def replace_algorithm(config: TrainingConfig, algorithm: Algorithm) -> TrainingConfig:
+    """Return a copy of ``config`` with a different algorithm selected."""
+    from dataclasses import replace
+
+    return replace(config, algorithm=algorithm)
+
+
 def main() -> None:
-    train_ppo_model()
+    train_agent_model()
 
 
 if __name__ == "__main__":

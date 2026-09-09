@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from eval.rule_baselines import rule_baseline_env_config, run_rule_baseline
-from models.ppo.synthetic import make_synthetic_features
+from models.rl.synthetic import make_synthetic_features
 
 
 def _random_alpha_wide(features: pd.DataFrame, seed: int) -> pd.DataFrame:

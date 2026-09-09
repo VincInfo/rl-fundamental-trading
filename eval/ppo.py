@@ -7,8 +7,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from models.ppo.panel import MarketPanel
-from models.ppo.trading_env import BUY, HOLD, SELL, MultiStockTradingEnv
+from models.rl.panel import MarketPanel
+from models.rl.envs import BUY, HOLD, SELL, MultiStockTradingEnv
 
 try:
     from stable_baselines3 import PPO
@@ -233,7 +233,7 @@ def _run_rollout(
     residual: bool = False,
 ) -> tuple[pd.DataFrame, list[float], list[np.ndarray], list[float], list[np.ndarray], list[float]]:
     """Run one deterministic episode and retain portfolio-level observations."""
-    from models.ppo.residual import compose_residual_actions
+    from models.rl.residual import compose_residual_actions
 
     obs = env.reset()
     initial_cash = float(env.get_attr("initial_cash")[0])

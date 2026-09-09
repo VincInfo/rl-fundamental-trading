@@ -3,8 +3,8 @@ from __future__ import annotations
 import numpy as np
 
 from eval.ppo import make_alpha_rule_policy
-from models.ppo.residual import RESIDUAL_KEEP, ResidualAlphaEnv
-from models.ppo.trading_env import MultiStockTradingEnv
+from models.rl.residual import RESIDUAL_KEEP, ResidualAlphaEnv
+from models.rl.envs import MultiStockTradingEnv
 
 try:
     import torch

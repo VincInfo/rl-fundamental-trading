@@ -2,8 +2,8 @@ import pandas as pd
 import pytest
 
 from models.alpha.features import daily_rebalance_mask
-from models.ppo.features import MARKET_FEATURE_COLUMNS, build_market_features
-from models.ppo.panel import build_panel
+from models.rl.features import MARKET_FEATURE_COLUMNS, build_market_features
+from models.rl.panel import build_panel
 
 
 def _hourly_wide_frame(n_days: int, tickers: list[str]) -> pd.DataFrame:

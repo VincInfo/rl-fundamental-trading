@@ -22,10 +22,10 @@ from models.alpha.config import (
 from models.alpha.features import build_dataset, load_splits
 from models.alpha.scoring import load_trained_alpha_model, predict_alpha_wide, training_config_for_model
 from models.alpha.xgboost_model import XGBoostModel
-from models.ppo.config import EnvConfig
-from models.ppo.features import build_market_features
-from models.ppo.panel import build_panel
-from models.ppo.training import build_env
+from models.rl.config import EnvConfig
+from models.rl.features import build_market_features
+from models.rl.panel import build_panel
+from models.rl.training import build_env
 
 ALPHA_HORIZON_DAYS = 20
 

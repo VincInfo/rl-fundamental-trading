@@ -14,16 +14,16 @@ from eval.ppo import (
     make_alpha_rule_policy,
     rollout_fixed_policy,
 )
-from models.ppo.panel import build_panel
-from models.ppo.residual import (
+from models.rl.panel import build_panel
+from models.rl.residual import (
     RESIDUAL_DOWN,
     RESIDUAL_KEEP,
     RESIDUAL_UP,
     ResidualAlphaEnv,
     compose_residual_actions,
 )
-from models.ppo.synthetic import make_synthetic_features
-from models.ppo.trading_env import BUY, HOLD, SELL, MultiStockTradingEnv
+from models.rl.synthetic import make_synthetic_features
+from models.rl.envs import BUY, HOLD, SELL, MultiStockTradingEnv
 
 
 def _random_alpha_wide(features: pd.DataFrame, seed: int) -> pd.DataFrame:
@@ -133,7 +133,7 @@ def test_init_keep_logit_bias_shifts_keep_channel():
     import torch
     from torch import nn
 
-    from models.ppo.callbacks import init_keep_logit_bias
+    from models.rl.callbacks import init_keep_logit_bias
 
     class _Space:
         nvec = np.array([3, 3, 3, 3])

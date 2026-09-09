@@ -10,7 +10,7 @@ from models.alpha.config import (
     DEFAULT_ARTIFACT_DIR as DEFAULT_ALPHA_ARTIFACT_DIR,
     DEFAULT_MARKET_ARTIFACT_DIR as DEFAULT_ALPHA_MARKET_ARTIFACT_DIR,
 )
-from models.ppo.config import (
+from models.rl.config import (
     DEFAULT_ARTIFACT_DIR,
     DEFAULT_HORIZON_ARTIFACT_DIR,
     DEFAULT_MARKET_ARTIFACT_DIR,
@@ -18,16 +18,22 @@ from models.ppo.config import (
     EnvConfig,
     TrainingConfig,
 )
-from models.ppo.training import train_ppo_model
+from models.rl.training import train_agent_model
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train the PPO trading agent.")
+    parser = argparse.ArgumentParser(description="Train the RL trading agent (PPO or SAC).")
+    parser.add_argument(
+        "--algorithm",
+        choices=("ppo", "sac"),
+        default="ppo",
+        help="RL algorithm to use. PPO uses a discrete action space, SAC a continuous one.",
+    )
     parser.add_argument(
         "--timesteps",
         type=int,
         default=200_000,
-        help="PPO environment steps. 20_000 is only a smoke test; default is 200_000.",
+        help="Environment steps. 20_000 is only a smoke test; default is 200_000.",
     )
     parser.add_argument("--vol-window", type=int, default=20)
     parser.add_argument(
@@ -122,9 +128,9 @@ def main() -> None:
         )
     if args.output is None:
         if args.no_keep_prior and args.match_alpha_horizon:
-            args.output = Path("models/ppo/artifacts_20d_noprior")
+            args.output = Path("models/rl/artifacts_20d_noprior")
             if args.no_fundamentals:
-                args.output = Path("models/ppo/artifacts_market_20d_noprior")
+                args.output = Path("models/rl/artifacts_market_20d_noprior")
         elif args.match_alpha_horizon:
             args.output = (
                 DEFAULT_MARKET_HORIZON_ARTIFACT_DIR
@@ -150,19 +156,21 @@ def main() -> None:
         env_kwargs.setdefault("rebalance_every", 20)
         env_kwargs.setdefault("rebalance_mode", "snapshot")
         env_kwargs.setdefault("min_holding_days", 0)
+    is_sac = args.algorithm == "sac"
     config = TrainingConfig(
         timesteps=args.timesteps,
         seed=args.seed,
+        algorithm=args.algorithm,
         alpha_model_dir=args.alpha_model,
         alpha_scores_path=args.alpha_scores,
         artifact_dir=args.output,
-        use_residual_actions=not args.no_residual,
-        imitation_epochs=0 if args.no_imitation else defaults.imitation_epochs,
-        keep_bias=0.0 if args.no_keep_prior else defaults.keep_bias,
-        keep_coef=0.0 if args.no_keep_prior else defaults.keep_coef,
+        use_residual_actions=False if is_sac else not args.no_residual,
+        imitation_epochs=0 if (is_sac or args.no_imitation) else defaults.imitation_epochs,
+        keep_bias=0.0 if (is_sac or args.no_keep_prior) else defaults.keep_bias,
+        keep_coef=0.0 if (is_sac or args.no_keep_prior) else defaults.keep_coef,
         env=EnvConfig(**env_kwargs),
     )
-    train_ppo_model(training_config=config)
+    train_agent_model(training_config=config)
 
 
 if __name__ == "__main__":

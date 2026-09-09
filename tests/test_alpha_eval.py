@@ -5,9 +5,9 @@ from eval.alpha import evaluate_alpha_predictions, json_ready_metrics
 from eval.comparison import blend_alpha_wides
 from eval.ppo import make_hybrid_rule_policy
 from models.alpha.config import infer_feature_flags
-from models.ppo.panel import build_panel
-from models.ppo.synthetic import make_synthetic_features
-from models.ppo.trading_env import HOLD, MultiStockTradingEnv
+from models.rl.panel import build_panel
+from models.rl.synthetic import make_synthetic_features
+from models.rl.envs import HOLD, MultiStockTradingEnv
 from tests.test_trading_env import _random_alpha_wide
 
 

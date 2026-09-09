@@ -4,9 +4,9 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
-from models.ppo.config import EnvConfig
+from models.rl.config import EnvConfig
 from eval.ppo import cost_floor_from_bps, rule_actions_from_alpha
-from models.ppo.trading_env import BUY, HOLD, SELL, MultiStockTradingEnv
+from models.rl.envs import BUY, HOLD, SELL, MultiStockTradingEnv
 
 # Residual codes relative to the rule action: decrease / keep / increase.
 RESIDUAL_DOWN, RESIDUAL_KEEP, RESIDUAL_UP = 0, 1, 2

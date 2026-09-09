@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 
 from eval.ppo import rollout_diagnostics
-from models.ppo.residual import RESIDUAL_KEEP
+from models.rl.residual import RESIDUAL_KEEP
 
 try:
     import torch
