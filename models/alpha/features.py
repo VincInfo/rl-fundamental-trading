@@ -104,11 +104,16 @@ def _combined_wide_frame(
     close = wide_frame["Close"]
     market_features = _wide_market_features(close, config)
 
-    fundamental_mask = wide_frame.columns.get_level_values("Feature").isin(
-        FUNDAMENTAL_FEATURE_COLUMNS
-    )
-    fundamentals = wide_frame.loc[:, fundamental_mask]
-    frames = [market_features, fundamentals, _wide_fundamental_changes(wide_frame)]
+    available_features = set(wide_frame.columns.get_level_values("Feature"))
+    has_fundamentals = set(FUNDAMENTAL_LEVEL_COLUMNS).issubset(available_features)
+    if has_fundamentals:
+        fundamental_mask = wide_frame.columns.get_level_values("Feature").isin(
+            FUNDAMENTAL_FEATURE_COLUMNS
+        )
+        fundamentals = wide_frame.loc[:, fundamental_mask]
+        frames = [market_features, fundamentals, _wide_fundamental_changes(wide_frame)]
+    else:
+        frames = [market_features]
     if include_target:
         frames.append(_wide_forward_return(close, config))
 
@@ -134,7 +139,7 @@ def build_inference_features(
     remain available as PPO state inputs.
     """
     long_frame = _to_long_frame(_combined_wide_frame(wide_frame, config, include_target=False))
-    feature_columns = list(MODEL_FEATURE_COLUMNS)
+    feature_columns = get_feature_names_for_frame(wide_frame)
     return long_frame.dropna(subset=feature_columns)[feature_columns]
 
 
@@ -148,7 +153,7 @@ def build_dataset(
     One row per (rebalance timestamp, ticker) when sample_daily=True.
     """
     long_frame = _to_long_frame(_combined_wide_frame(wide_frame, config, include_target=True))
-    feature_columns = list(MODEL_FEATURE_COLUMNS)
+    feature_columns = get_feature_names_for_frame(wide_frame)
     required_columns = feature_columns + [config.target_column]
     long_frame = long_frame.dropna(subset=required_columns)
     return long_frame[required_columns]
@@ -160,3 +165,11 @@ def get_feature_names(
 ) -> list[str]:
     """Return model input columns, excluding the supervised target."""
     return [column for column in dataset.columns if column != target_column]
+
+
+def get_feature_names_for_frame(wide_frame: pd.DataFrame) -> list[str]:
+    """Return the feature set supported by the supplied data variant."""
+    available = set(wide_frame.columns.get_level_values("Feature"))
+    if set(FUNDAMENTAL_LEVEL_COLUMNS).issubset(available):
+        return list(MODEL_FEATURE_COLUMNS)
+    return list(ENGINEERED_FEATURE_COLUMNS)

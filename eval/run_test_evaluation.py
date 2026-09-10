@@ -9,12 +9,13 @@ from pathlib import Path
 import subprocess
 
 import pandas as pd
-from data_pipeline import DataSplit
+from data_pipeline import DataSplit, DataVariant
 
 from eval.data_splits.loader import load_evaluation_splits
 from eval.ppo import portfolio_metrics, rollout_diagnostics
 from eval.portfolio import alpha_selection_count, run_baselines, summarize_ledgers
 from models.alpha.scoring import load_trained_alpha_model, predict_alpha_wide
+from models.alpha.config import TrainingConfig as AlphaTrainingConfig
 from models.ppo.config import TrainingConfig
 from models.ppo.features import build_market_features
 from models.ppo.panel import build_panel
@@ -36,11 +37,15 @@ def evaluate_test_split(
 ) -> dict[str, float]:
     """Evaluate the saved PPO agent and baselines once on the test split"""
     config = config or TrainingConfig()
-    splits = load_evaluation_splits()
+    splits = load_evaluation_splits(config.data_variant)
     test_wide = splits[DataSplit.TEST]
     test_features = build_market_features(test_wide)
     alpha_model = load_trained_alpha_model(config.alpha_model_dir)
-    test_alpha = predict_alpha_wide(alpha_model, test_wide)
+    test_alpha = predict_alpha_wide(
+        alpha_model,
+        test_wide,
+        AlphaTrainingConfig(data_variant=config.data_variant),
+    )
     if config.neutral_alpha:
         test_alpha = neutral_alpha_scores(test_alpha)
     test_panel = build_panel(test_features, test_alpha, vol_window=config.env.vol_window)
@@ -127,6 +132,7 @@ def _save_evaluation_metadata(
         "alpha_model_dir": str(config.alpha_model_dir),
         "ppo_artifact_dir": str(config.artifact_dir),
         "seed": config.seed,
+        "data_variant": config.data_variant.name,
         "neutral_alpha": config.neutral_alpha,
         "environment_config": asdict(config.env),
         "ppo_config": asdict(config.ppo),
@@ -175,12 +181,18 @@ def main() -> None:
     parser.add_argument("--ppo-artifact", type=Path, default=TrainingConfig().artifact_dir)
     parser.add_argument("--output", type=Path, default=Path("eval/results"))
     parser.add_argument("--neutral-alpha", action="store_true")
+    parser.add_argument(
+        "--data-variant",
+        choices=[variant.name for variant in DataVariant],
+        default=DataVariant.WITH_FUNDAMENTALS.name,
+    )
     args = parser.parse_args()
     evaluate_test_split(
         TrainingConfig(
             alpha_model_dir=args.alpha_model,
             artifact_dir=args.ppo_artifact,
             neutral_alpha=args.neutral_alpha,
+            data_variant=DataVariant[args.data_variant],
         ),
         output_dir=args.output,
     )

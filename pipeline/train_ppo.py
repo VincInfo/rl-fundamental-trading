@@ -2,6 +2,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from data_pipeline import DataVariant
+
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
@@ -35,6 +37,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
+        "--data-variant",
+        choices=[variant.name for variant in DataVariant],
+        default=DataVariant.WITH_FUNDAMENTALS.name,
+    )
+    parser.add_argument(
         "--neutral-alpha",
         action="store_true",
         help="Train an ablation with equal positive alpha scores for all stocks.",
@@ -64,6 +71,7 @@ def main() -> None:
         neutral_alpha=args.neutral_alpha,
         artifact_dir=args.output,
         evaluation_output_dir=args.evaluation_output,
+        data_variant=DataVariant[args.data_variant],
         env=EnvConfig(
             vol_window=args.vol_window,
             min_holding_days=args.min_holding_days,

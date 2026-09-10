@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from data_pipeline import DataVariant
+
 from models.alpha.config import DEFAULT_ARTIFACT_DIR as DEFAULT_ALPHA_ARTIFACT_DIR
 
 
@@ -34,6 +36,7 @@ class PpoConfig:
 
 @dataclass
 class TrainingConfig:
+    data_variant: DataVariant = DataVariant.WITH_FUNDAMENTALS
     timesteps: int = 200_000
     seed: int = 42
     alpha_model_dir: Path = DEFAULT_ALPHA_ARTIFACT_DIR

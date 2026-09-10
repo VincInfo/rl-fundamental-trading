@@ -1,6 +1,11 @@
 import pandas as pd
 
-from models.alpha.config import MODEL_FEATURE_COLUMNS, TARGET_COLUMN, TrainingConfig
+from models.alpha.config import (
+    ENGINEERED_FEATURE_COLUMNS,
+    MODEL_FEATURE_COLUMNS,
+    TARGET_COLUMN,
+    TrainingConfig,
+)
 from models.alpha.features import build_dataset, build_inference_features
 
 
@@ -66,6 +71,24 @@ def test_build_inference_features_keeps_rows_without_target():
     assert TARGET_COLUMN not in inference.columns
     assert len(inference) > len(dataset)
     assert set(inference.index.get_level_values("Ticker")) == set(tickers)
+
+
+def test_vanilla_features_exclude_fundamentals():
+    tickers = ["AAPL", "MSFT"]
+    fundamental_frame = _synthetic_wide_frame(rows=300, tickers=tickers)
+    close_columns = [("Close", ticker) for ticker in tickers]
+    vanilla_frame = fundamental_frame.loc[:, close_columns]
+    vanilla_frame.columns = pd.MultiIndex.from_tuples(
+        close_columns,
+        names=["Feature", "Ticker"],
+    )
+
+    dataset = build_dataset(vanilla_frame, _training_config())
+    inference = build_inference_features(vanilla_frame, _training_config())
+
+    assert list(dataset.columns) == list(ENGINEERED_FEATURE_COLUMNS) + [TARGET_COLUMN]
+    assert list(inference.columns) == list(ENGINEERED_FEATURE_COLUMNS)
+    assert not any(column.startswith("delta_") for column in dataset.columns)
 
 
 def test_delta_roe_persists_after_filing_jump():

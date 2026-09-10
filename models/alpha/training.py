@@ -17,7 +17,7 @@ def train_alpha_model(
 ) -> XGBoostModel:
     """End-to-end alpha model training on shared pipeline train/validation splits."""
     config = training_config or TrainingConfig()
-    splits = load_splits()
+    splits = load_splits(config.data_variant)
 
     train_dataset = build_dataset(splits[DataSplit.TRAIN], config)
     validation_dataset = build_dataset(splits[DataSplit.VALIDATION], config)
@@ -37,7 +37,10 @@ def train_alpha_model(
 
     metrics = evaluate(validation_dataset, model, config.target_column)
     _print_metrics(metrics)
-    _save_metrics(metrics, config.evaluation_output_dir)
+    _save_metrics(
+        {**metrics, "data_variant": config.data_variant.name},
+        config.evaluation_output_dir,
+    )
 
     model.save(config.artifact_dir)
 

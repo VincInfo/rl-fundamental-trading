@@ -24,6 +24,49 @@ uv run python pipeline/train_ppo.py
 uv run python -m eval.run_test_evaluation
 ```
 
+Die Auswertung mit Fundamentaldaten verwendet standardmäßig
+`DataVariant.WITH_FUNDAMENTALS` und schreibt in die Standardpfade
+`models/alpha/artifacts`, `models/ppo/artifacts` und `eval/results`.
+Für einen Vergleich ohne Fundamentaldaten und ohne von der Datenpipeline
+bereitgestellte technische Indikatoren wird `DataVariant.VANILLA` verwendet.
+Dieser Lauf muss strikt getrennte Modell- und Ergebnisordner verwenden, damit
+keine Artefakte des Fundamentals-Laufs überschrieben werden:
+
+```bash
+uv run python pipeline/train_alpha_model.py \
+  --data-variant VANILLA \
+  --output models/alpha/artifacts_vanilla \
+  --evaluation-output eval/results/vanilla
+
+uv run python pipeline/train_ppo.py \
+  --data-variant VANILLA \
+  --alpha-model models/alpha/artifacts_vanilla \
+  --output models/ppo/artifacts_vanilla \
+  --evaluation-output eval/results/vanilla
+
+uv run python -m eval.run_test_evaluation \
+  --data-variant VANILLA \
+  --alpha-model models/alpha/artifacts_vanilla \
+  --ppo-artifact models/ppo/artifacts_vanilla \
+  --output eval/results/vanilla
+```
+
+Die beiden Varianten werden anschließend über
+`eval/results/test_performance_summary.csv` und
+`eval/results/vanilla/test_performance_summary.csv` verglichen. Die
+Metadaten speichern zusätzlich die verwendete Datenvariante. Die im Alpha-
+Modell aus `Close` berechneten Merkmale wie Momentum und Volatilität bleiben
+in beiden Varianten identisch; entfernt werden die Fundamentaldaten und die
+von der Datenpipeline gelieferten Indikatorspalten.
+
+Für die Aussage über den Einfluss der Fundamentaldaten werden ausschließlich
+die beiden separat trainierten PPO-Läufe miteinander verglichen: der Lauf mit
+`WITH_FUNDAMENTALS` und der Lauf mit `VANILLA`. Jede Variante verwendet dabei
+ein auf derselben Variante trainiertes Alpha-Modell. Die Baselines werden
+innerhalb jeder Variante mit den jeweils passenden Alpha-Scores berechnet.
+Ein Vergleich des Vanilla-Agenten mit dem Fundamentals-Alpha-Modell oder ein
+Vergleich über Kreuz wäre für diese Fragestellung nicht zulässig.
+
 Die Trainingsschritte können entfallen, wenn die benötigten Modellartefakte
 bereits vorhanden sind. Die finale Testauswertung darf erst ausgeführt werden,
 wenn Modellvarianten und Hyperparameter anhand der Trainings- und Validation-
@@ -61,6 +104,11 @@ eval/results/
   test_performance_summary.csv
   test_evaluation_metrics.json
   test_evaluation_metadata.json
+  vanilla/                 # separate VANILLA-Auswertung
+    alpha_training_metrics.json
+    ppo_training_metrics.json
+    ppo_test_portfolio.csv
+    test_performance_summary.csv
   neutral_alpha/              # optionale Ablation
   notebook_outputs/           # abgeleitete Notebook-Exporte
 ```

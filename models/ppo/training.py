@@ -98,7 +98,7 @@ def _save_metrics(metrics: dict, eval_dir: Path) -> None:
 def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
     """End-to-end PPO training on pipeline market data and trained alpha scores."""
     config = training_config or TrainingConfig()
-    splits = load_splits()
+    splits = load_splits(config.data_variant)
 
     train_wide = splits[DataSplit.TRAIN]
     validation_wide = splits[DataSplit.VALIDATION]
@@ -196,6 +196,7 @@ def train_ppo_model(training_config: TrainingConfig | None = None) -> PPO:
 
     _save_metrics(
         {
+            "data_variant": config.data_variant.name,
             "timesteps": config.timesteps,
             "train_days": train_days,
             "val_days": validation_days,

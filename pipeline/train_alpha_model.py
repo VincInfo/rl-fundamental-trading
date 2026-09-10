@@ -2,6 +2,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from data_pipeline import DataVariant
+
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
@@ -34,6 +36,11 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_EVALUATION_OUTPUT_DIR,
         help="Directory for training diagnostics.",
     )
+    parser.add_argument(
+        "--data-variant",
+        choices=[variant.name for variant in DataVariant],
+        default=DataVariant.WITH_FUNDAMENTALS.name,
+    )
     return parser.parse_args()
 
 
@@ -43,6 +50,7 @@ def main() -> None:
         horizon_trading_days=args.horizon_days,
         artifact_dir=args.output,
         evaluation_output_dir=args.evaluation_output,
+        data_variant=DataVariant[args.data_variant],
     )
     train_alpha_model(training_config=config)
 

@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+from data_pipeline import DataVariant
+
 
 DEFAULT_ARTIFACT_DIR = Path("models/alpha/artifacts")
 DEFAULT_EVALUATION_OUTPUT_DIR = Path("eval/results")
@@ -42,6 +44,7 @@ MODEL_FEATURE_COLUMNS = (
 
 @dataclass
 class TrainingConfig:
+    data_variant: DataVariant = DataVariant.WITH_FUNDAMENTALS
     horizon_trading_days: int = 5
     bars_per_trading_day: int = 7
     target_column: str = TARGET_COLUMN
