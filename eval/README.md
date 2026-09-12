@@ -30,7 +30,7 @@ Beide Varianten benötigen dieselben chronologischen Splits, dasselbe Target und
 ## Ausführung
 
 Installiern / synchronisieren der Projektumgebung & ausführen
-aller automatisierten Tests: 
+aller automatisierten Tests:
 
 ```bash
 uv sync

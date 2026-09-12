@@ -173,6 +173,20 @@ def _alpha_quality_for_model(
     return evaluate_alpha_predictions(predictions, dataset[config.target_column])
 
 
+def _alpha_observation_ids_for_model(
+    model: XGBoostModel,
+    wide: pd.DataFrame,
+    target_config: TrainingConfig,
+) -> list[tuple[str, str]]:
+    """Return the exact date-ticker observations used for Alpha metrics."""
+    config = training_config_for_model(model, target_config)
+    dataset = build_dataset(wide, config)
+    return [
+        (str(date), str(ticker))
+        for date, ticker in dataset.index
+    ]
+
+
 def _nested_set(root: dict, keys: list[str], value: dict) -> None:
     cursor = root
     for key in keys[:-1]:
@@ -280,10 +294,9 @@ def evaluate_comparison(
             results["alpha_quality"][split_name][model_name] = quality
             rank_ic_by_model[model_name] = quality["rank_ic_mean"]
             alpha_wides[model_name] = predict_alpha_wide(model, wide, target_config)
-            observation_ids[model_name] = [
-                (str(date), str(ticker))
-                for date, ticker in alpha_wides[model_name].stack().dropna().index
-            ]
+            observation_ids[model_name] = _alpha_observation_ids_for_model(
+                model, wide, target_config
+            )
             print(
                 f"{split_name:10} {model_name:12} quality  "
                 f"pooled_ic={quality['ic']:.3f}  "
