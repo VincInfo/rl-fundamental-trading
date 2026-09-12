@@ -37,3 +37,19 @@ def test_20d_snapshot_has_lower_turnover_than_daily() -> None:
         features, alpha, rule_baseline_env_config(allow_short=False, rebalance_every=20)
     )
     assert horizon["mean_turnover"] < daily["mean_turnover"]
+
+
+def test_run_rule_baseline_can_return_daily_ledger() -> None:
+    features = make_synthetic_features(n_stocks=4, n_days=40, seed=23)
+    alpha = _random_alpha_wide(features, seed=23)
+    result = run_rule_baseline(
+        features,
+        alpha,
+        rule_baseline_env_config(allow_short=False, rebalance_every=20),
+        return_ledger=True,
+    )
+    metrics, ledger = result
+    assert len(ledger) == metrics["n_steps"] + 1
+    assert ledger["date"].is_monotonic_increasing
+    assert ledger["portfolio_value"].gt(0).all()
+    assert ledger["transaction_cost"].ge(0).all()

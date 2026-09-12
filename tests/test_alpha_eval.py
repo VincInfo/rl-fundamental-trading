@@ -1,7 +1,11 @@
 import pytest
 import pandas as pd
 
-from eval.alpha import evaluate_alpha_predictions, json_ready_metrics
+from eval.alpha import (
+    block_bootstrap_mean_difference,
+    evaluate_alpha_predictions,
+    json_ready_metrics,
+)
 from eval.comparison import blend_alpha_wides
 from eval.ppo import make_hybrid_rule_policy
 from models.alpha.config import infer_feature_flags
@@ -35,6 +39,21 @@ def test_json_ready_metrics_replaces_nan() -> None:
     payload = json_ready_metrics({"ic": float("nan"), "nested": {"x": float("inf")}})
     assert payload["ic"] is None
     assert payload["nested"]["x"] is None
+
+
+def test_block_bootstrap_is_reproducible_and_reports_mean_difference() -> None:
+    index = pd.date_range("2024-01-01", periods=40, freq="D")
+    first = pd.Series(0.02, index=index)
+    second = pd.Series(0.01, index=index)
+
+    result = block_bootstrap_mean_difference(
+        first, second, block_size=5, n_bootstrap=100, seed=7
+    )
+
+    assert result["observed_mean_difference"] == pytest.approx(0.01)
+    assert result == block_bootstrap_mean_difference(
+        first, second, block_size=5, n_bootstrap=100, seed=7
+    )
 
 
 def test_infer_feature_flags_for_no_levels() -> None:

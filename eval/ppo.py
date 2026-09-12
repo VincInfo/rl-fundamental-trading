@@ -1,3 +1,5 @@
+"""Trading policies, portfolio rollouts, and performance metrics for evaluation."""
+
 from __future__ import annotations
 
 import math
@@ -15,7 +17,7 @@ try:
     from stable_baselines3.common.vec_env import VecNormalize
 except ImportError as exc:  # pragma: no cover
     raise RuntimeError(
-        "stable-baselines3 fehlt. Installiere es mit: uv add stable-baselines3"
+        "stable-baselines3 is missing. Install it with: uv add stable-baselines3"
     ) from exc
 
 ACTION_NAMES = {SELL: "sell", HOLD: "hold", BUY: "buy"}
@@ -341,6 +343,15 @@ def rollout_fixed_policy(
     action_fn: Callable[[MultiStockTradingEnv], np.ndarray],
 ) -> dict[str, float]:
     """Run one episode with a deterministic action function on a raw env."""
+    metrics, _ = rollout_fixed_policy_with_ledger(env, action_fn)
+    return metrics
+
+
+def rollout_fixed_policy_with_ledger(
+    env: MultiStockTradingEnv,
+    action_fn: Callable[[MultiStockTradingEnv], np.ndarray],
+) -> tuple[dict[str, float], pd.DataFrame]:
+    """Run a fixed policy and return both summary metrics and daily ledger."""
     _, info = env.reset()
     n_stocks = env.n_stocks
     records: list[dict[str, object]] = [
@@ -383,7 +394,7 @@ def rollout_fixed_policy(
     metrics = _summarize_rollout(rewards, collected_actions)
     metrics["mean_log_return"] = float(np.mean(log_returns)) if log_returns else 0.0
     metrics.update(portfolio_metrics(ledger))
-    return metrics
+    return metrics, ledger
 
 
 def make_alpha_quantile_policy(

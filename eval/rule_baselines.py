@@ -1,3 +1,5 @@
+"""Public compatibility exports for rule-based Alpha baseline evaluation."""
+
 from eval.comparison import (
     ALPHA_HORIZON_DAYS,
     evaluate_rule_baselines,

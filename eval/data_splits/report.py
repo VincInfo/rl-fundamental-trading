@@ -1,3 +1,5 @@
+"""Print a concise report of the configured chronological evaluation splits."""
+
 from __future__ import annotations
 
 import sys

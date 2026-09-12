@@ -1,3 +1,5 @@
+"""Load, validate, and summarize the chronological evaluation data splits."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
