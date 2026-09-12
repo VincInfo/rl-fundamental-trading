@@ -24,21 +24,20 @@ def _csv_splits(raw: str):
         "train": DataSplit.TRAIN,
         "validation": DataSplit.VALIDATION,
         "val": DataSplit.VALIDATION,
+        "test": DataSplit.TEST,
     }
     splits = []
     for part in raw.split(","):
         key = part.strip().lower()
-        if key == "test":
-            raise ValueError("Test split is locked and cannot be used in this comparison.")
         if key not in mapping:
-            raise ValueError(f"Unknown split {part!r}; use train,validation.")
+            raise ValueError(f"Unknown split {part!r}; use train,validation,test.")
         splits.append(mapping[key])
     return tuple(splits)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Alpha quality + rule trading grid (train/validation only)."
+        description="Alpha quality + rule trading grid for an explicitly selected split."
     )
     parser.add_argument(
         "--rebalance",
@@ -50,10 +49,14 @@ def parse_args() -> argparse.Namespace:
         default="long_only,long_short",
         help="Comma-separated books: long_only,long_short (hybrid is separate).",
     )
-    parser.add_argument("--splits", default="train,validation")
+    parser.add_argument(
+        "--splits",
+        default="validation",
+        help="Comma-separated splits; use test only for the final locked evaluation.",
+    )
     parser.add_argument("--no-hybrid", action="store_true")
     parser.add_argument("--hybrid-long", default="full")
-    parser.add_argument("--hybrid-short", default="vanilla")
+    parser.add_argument("--hybrid-short", default="market")
     parser.add_argument("--no-blend", action="store_true")
     parser.add_argument(
         "--blend-method",

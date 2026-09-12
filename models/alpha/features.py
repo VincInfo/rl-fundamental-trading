@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import numpy as np
 from data_pipeline import DataSplit, DataVariant
 
 from eval.data_splits.loader import load_evaluation_splits
@@ -73,6 +74,10 @@ def _wide_market_features(
         "hl_range": (high - low) / close,
         "volume_change_1d": volume / volume.shift(bars_per_day) - 1,
         "rel_volume_20d": volume / avg_volume_20d - 1,
+    }
+    computations = {
+        name: values.replace([np.inf, -np.inf], np.nan)
+        for name, values in computations.items()
     }
     missing_engineered = set(ENGINEERED_FEATURE_COLUMNS) - set(computations)
     if missing_engineered:

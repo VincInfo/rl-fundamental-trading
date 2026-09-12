@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -151,6 +152,16 @@ def test_build_inference_features_keeps_rows_without_target():
     assert TARGET_COLUMN not in inference.columns
     assert len(inference) > len(dataset)
     assert set(inference.index.get_level_values("Ticker")) == set(tickers)
+
+
+def test_build_dataset_contains_only_finite_model_values():
+    tickers = ["AAPL", "MSFT"]
+    wide_frame = _synthetic_wide_frame(rows=300, tickers=tickers)
+    dataset = build_dataset(wide_frame, _training_config(include_fundamentals=False))
+
+    assert np.isfinite(
+        dataset[list(MARKET_FEATURE_COLUMNS)].to_numpy(dtype=float)
+    ).all()
 
 
 def test_delta_roe_persists_after_filing_jump():

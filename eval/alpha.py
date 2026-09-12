@@ -1,7 +1,10 @@
+"""Metrics and uncertainty estimates for Alpha prediction evaluation."""
+
 from __future__ import annotations
 
 import math
 
+import numpy as np
 import pandas as pd
 
 
@@ -121,6 +124,53 @@ def evaluate_alpha_predictions(
     metrics.update(daily_rank_ic(predictions, actual))
     metrics.update(daily_pearson_ic(predictions, actual))
     return metrics
+
+
+def block_bootstrap_mean_difference(
+    first: pd.Series,
+    second: pd.Series,
+    *,
+    block_size: int = 20,
+    n_bootstrap: int = 1_000,
+    seed: int = 42,
+    confidence: float = 0.95,
+) -> dict[str, float]:
+    """Estimate a block-bootstrap interval for two aligned return series.
+
+    The result is descriptive: it quantifies uncertainty in the mean-return
+    difference while preserving short-range time dependence within blocks.
+    """
+    aligned = pd.concat(
+        [first.rename("first"), second.rename("second")], axis=1
+    ).dropna()
+    if block_size < 1 or n_bootstrap < 1 or not 0.0 < confidence < 1.0:
+        raise ValueError("block_size, n_bootstrap, and confidence are invalid")
+    if len(aligned) < block_size:
+        raise ValueError("return series is shorter than the bootstrap block")
+
+    differences = (aligned["first"] - aligned["second"]).to_numpy(dtype=float)
+    starts = np.arange(len(differences) - block_size + 1)
+    rng = np.random.default_rng(seed)
+    estimates = np.empty(n_bootstrap, dtype=float)
+    blocks_per_sample = int(math.ceil(len(differences) / block_size))
+    for sample_index in range(n_bootstrap):
+        sampled_starts = rng.choice(starts, size=blocks_per_sample, replace=True)
+        sample = np.concatenate(
+            [differences[start : start + block_size] for start in sampled_starts]
+        )[: len(differences)]
+        estimates[sample_index] = sample.mean()
+
+    tail = (1.0 - confidence) / 2.0
+    lower, upper = np.quantile(estimates, [tail, 1.0 - tail])
+    return {
+        "observed_mean_difference": float(differences.mean()),
+        "lower": float(lower),
+        "upper": float(upper),
+        "n_observations": float(len(differences)),
+        "block_size": float(block_size),
+        "n_bootstrap": float(n_bootstrap),
+        "confidence": float(confidence),
+    }
 
 
 def json_ready_metrics(value):
