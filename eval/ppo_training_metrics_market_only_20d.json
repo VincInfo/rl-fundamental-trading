@@ -5,6 +5,7 @@
   "n_stocks": 20,
   "steps_per_episode": 80,
   "train_window_passes": 2500.0,
+  "algorithm": "ppo",
   "clip_range": 0.1,
   "n_epochs": 6,
   "ent_coef": 0.002,

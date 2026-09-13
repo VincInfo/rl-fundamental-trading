@@ -1,8 +1,17 @@
 {
   "mse": 0.01116415230763827,
   "ic": 0.24537590125855843,
-  "n_samples": 1120,
+  "n_samples": 1120.0,
+  "score_autocorr_1d": 0.9653150480315917,
+  "rank_ic_mean": 0.14285714285714285,
+  "rank_ic_median": 0.1413533834586466,
+  "rank_ic_std": 0.20055950395571845,
+  "rank_ic_n_days": 56.0,
+  "pearson_ic_mean": 0.2660461127904375,
+  "pearson_ic_median": 0.24201862215028042,
+  "pearson_ic_n_days": 56.0,
   "include_fundamentals": true,
+  "use_fundamental_levels": true,
   "feature_set": "with_fundamentals",
   "feature_names": [
     "return_1d",
@@ -33,5 +42,18 @@
     "rank_delta_operating_cashflow"
   ],
   "horizon_trading_days": 20,
-  "active_return": true
+  "active_return": true,
+  "train": {
+    "mse": 0.004316456205114126,
+    "ic": 0.7341385476361518,
+    "n_samples": 4880.0,
+    "score_autocorr_1d": 0.9722133507684307,
+    "rank_ic_mean": 0.6560212005423394,
+    "rank_ic_median": 0.6812030075187969,
+    "rank_ic_std": 0.16364002731616326,
+    "rank_ic_n_days": 244.0,
+    "pearson_ic_mean": 0.7042360715895107,
+    "pearson_ic_median": 0.7473673908706915,
+    "pearson_ic_n_days": 244.0
+  }
 }

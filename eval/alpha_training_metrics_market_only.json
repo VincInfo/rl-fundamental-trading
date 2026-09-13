@@ -1,8 +1,17 @@
 {
   "mse": 0.011446222877055665,
   "ic": 0.15660147976863364,
-  "n_samples": 1120,
+  "n_samples": 1120.0,
+  "score_autocorr_1d": 0.7325225804177442,
+  "rank_ic_mean": 0.19124597207303973,
+  "rank_ic_median": 0.20676691729323307,
+  "rank_ic_std": 0.2716879578329763,
+  "rank_ic_n_days": 56.0,
+  "pearson_ic_mean": 0.1622194647526222,
+  "pearson_ic_median": 0.13583656594414356,
+  "pearson_ic_n_days": 56.0,
   "include_fundamentals": false,
+  "use_fundamental_levels": false,
   "feature_set": "market_only",
   "feature_names": [
     "return_1d",
@@ -15,5 +24,18 @@
     "rel_volume_20d"
   ],
   "horizon_trading_days": 20,
-  "active_return": true
+  "active_return": true,
+  "train": {
+    "mse": 0.006231588333370216,
+    "ic": 0.5240748919798024,
+    "n_samples": 4880.0,
+    "score_autocorr_1d": 0.8239372620584808,
+    "rank_ic_mean": 0.3885615678540614,
+    "rank_ic_median": 0.3789473684210526,
+    "rank_ic_std": 0.24577035187578242,
+    "rank_ic_n_days": 244.0,
+    "pearson_ic_mean": 0.4855658432685193,
+    "pearson_ic_median": 0.5315036673995499,
+    "pearson_ic_n_days": 244.0
+  }
 }
