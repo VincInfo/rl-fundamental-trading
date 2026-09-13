@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+import pandas as pd
 
 from models.rl.panel import MarketPanel
 from models.rl.envs import BUY, HOLD, SELL
@@ -18,6 +19,13 @@ except ImportError as exc:  # pragma: no cover
 
 ACTION_NAMES = {SELL: "sell", HOLD: "hold", BUY: "buy"}
 CONTINUOUS_ACTION_THRESHOLD = 0.1
+COMPARISON_METRICS = (
+    "cumulative_return", "annualized_volatility", "sharpe_ratio", "max_drawdown",
+    "mean_turnover", "total_transaction_cost", "mean_reward", "n_steps",
+    "action_share_sell", "action_share_hold", "action_share_buy",
+    "residual_action_share_down", "residual_action_share_keep",
+    "residual_action_share_up",
+)
 
 
 def episode_length(n_days: int) -> int:
@@ -133,3 +141,133 @@ def diagnostics_for(model: BaseAlgorithm, env: VecNormalize) -> dict[str, float]
     if isinstance(model, SAC):
         return continuous_rollout_diagnostics(model, env)
     return rollout_diagnostics(model, env)
+
+
+def ppo_rollout_metrics(model: PPO, env: VecNormalize) -> dict[str, float]:
+    """Evaluate a deterministic PPO rollout using environment accounting."""
+    obs = env.reset()
+    rewards: list[float] = []
+    returns: list[float] = []
+    turnovers: list[float] = []
+    costs: list[float] = []
+    actions: list[np.ndarray] = []
+    residual_actions: list[np.ndarray] = []
+    done = False
+    while not done:
+        action, _ = model.predict(obs, deterministic=True)
+        obs, reward, dones, infos = env.step(action)
+        info = infos[0]
+        executed_action = info.get("final_action", info.get("action", action))
+        actions.append(np.asarray(executed_action).reshape(-1))
+        residual_actions.append(
+            np.asarray(info.get("residual_action", action)).reshape(-1)
+        )
+        # The environment reports the return realized by this step, including
+        # the first trade from the initial portfolio state.
+        returns.append(float(info["log_return"]))
+        rewards.append(float(reward[0]))
+        turnovers.append(float(info["turnover"]))
+        costs.append(float(info["transaction_cost"]))
+        done = bool(dones[0])
+
+    values = np.asarray(returns, dtype=float)
+    volatility = float(values.std(ddof=1) * math.sqrt(252)) if len(values) > 1 else 0.0
+    mean_return = float(values.mean()) if len(values) else 0.0
+    sharpe = float(mean_return / values.std(ddof=1) * math.sqrt(252)) if len(values) > 1 and values.std(ddof=1) > 0 else 0.0
+    equity = np.exp(np.cumsum(values)) if len(values) else np.ones(1)
+    drawdown = equity / np.maximum.accumulate(equity) - 1.0
+    stacked = np.stack(actions) if actions else np.zeros((0, 1), dtype=np.int64)
+    shares = action_shares(stacked)
+    stacked_residual = (
+        np.stack(residual_actions)
+        if residual_actions
+        else np.zeros((0, 1), dtype=np.int64)
+    )
+    residual_shares = {
+        "down": float((stacked_residual == 0).mean()) if stacked_residual.size else 0.0,
+        "keep": float((stacked_residual == 1).mean()) if stacked_residual.size else 0.0,
+        "up": float((stacked_residual == 2).mean()) if stacked_residual.size else 0.0,
+    }
+    return {
+        "cumulative_return": float(equity[-1] - 1.0),
+        "annualized_volatility": volatility,
+        "sharpe_ratio": sharpe,
+        "max_drawdown": float(drawdown.min()),
+        "mean_turnover": float(np.mean(turnovers)) if turnovers else 0.0,
+        "total_transaction_cost": float(np.sum(costs)),
+        "mean_reward": float(np.mean(rewards)) if rewards else 0.0,
+        "n_steps": len(rewards),
+        **{f"action_share_{name}": value for name, value in shares.items()},
+        **{
+            f"residual_action_share_{name}": value
+            for name, value in residual_shares.items()
+        },
+    }
+
+
+def reference_portfolio_metrics(
+    features: pd.DataFrame,
+    *,
+    start_index: int = 0,
+) -> dict[str, dict[str, float]]:
+    """Evaluate references on the selected daily close return window.
+
+    ``start_index`` aligns the first included return with the portfolio state
+    used by the PPO environment. The default preserves the full-frame behavior.
+    """
+    returns = features.pivot(index="date", columns="symbol", values="return_1d")
+    returns = returns.sort_index().dropna(how="all").fillna(0.0)
+    if start_index < 0 or start_index >= len(returns):
+        raise ValueError(
+            f"start_index={start_index} outside return window of length {len(returns)}"
+        )
+    returns = returns.iloc[start_index:]
+    equal_weight = returns.mean(axis=1).to_numpy(dtype=float)
+    buy_and_hold = (
+        returns.add(1.0).cumprod(axis=0).mean(axis=1).pct_change().fillna(0.0)
+        .to_numpy(dtype=float)
+    )
+
+    def summarize(daily_returns: np.ndarray) -> dict[str, float]:
+        log_returns = np.log(np.maximum(1.0 + daily_returns, 1e-8))
+        volatility = float(log_returns.std(ddof=1) * math.sqrt(252)) if len(log_returns) > 1 else 0.0
+        mean_return = float(log_returns.mean()) if len(log_returns) else 0.0
+        sharpe = (
+            float(mean_return / log_returns.std(ddof=1) * math.sqrt(252))
+            if len(log_returns) > 1 and log_returns.std(ddof=1) > 0
+            else 0.0
+        )
+        equity = np.exp(np.cumsum(log_returns)) if len(log_returns) else np.ones(1)
+        drawdown = equity / np.maximum.accumulate(equity) - 1.0
+        return {
+            "cumulative_return": float(equity[-1] - 1.0),
+            "annualized_volatility": volatility,
+            "sharpe_ratio": sharpe,
+            "max_drawdown": float(drawdown.min()),
+            "n_steps": int(len(log_returns)),
+        }
+
+    return {
+        "buy_and_hold": summarize(buy_and_hold),
+        "equal_weight": summarize(equal_weight),
+    }
+
+
+def comparison_metrics(metrics: dict[str, float]) -> dict[str, float]:
+    """Keep the stable, comparable fields from a PPO evaluation result."""
+    return {name: float(metrics.get(name, 0.0)) for name in COMPARISON_METRICS}
+
+
+def compare_metric_sets(
+    market_only: dict[str, float], full_alpha: dict[str, float]
+) -> dict[str, dict[str, float]]:
+    """Return comparable metrics and the full-alpha minus market-only delta."""
+    market = comparison_metrics(market_only)
+    full = comparison_metrics(full_alpha)
+    return {
+        "market_only": market,
+        "full_alpha": full,
+        "delta_full_minus_market": {
+            name: full[name] - market[name] for name in COMPARISON_METRICS
+        },
+    }

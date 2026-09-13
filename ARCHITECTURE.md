@@ -6,13 +6,15 @@ Das System trennt **Prognose**, **Handelsentscheidung** und **Positionsgröße**
 
 - Das **Alpha-Modell** prognostiziert die Attraktivität einer Aktie.
 - Das **Risk Adjustment** setzt das Signal ins Verhältnis zum Risiko.
-- Der **RL-Agent** entscheidet je Aktie zwischen **Buy, Hold und Sell**.
+- Das **RL-Environment** kombiniert eine Alpha-Regel mit den Residualaktionen
+        des PPO-Agenten.
 - Das **Position Sizing** übersetzt Aktion und Signalstärke in eine Trade-Größe.
 - **Portfolio Constraints** begrenzen die resultierenden Positionen und Trades.
 
 ```text
 Market + Fundamental Data → Feature Engineering → Alpha Model
-→ Alpha Scores → Risk Adjustment → RL Agent (Buy/Hold/Sell)
+→ Alpha Scores → Alpha Rule → PPO Residual Policy (Down/Keep/Up)
+→ finale Aktion (Sell/Hold/Buy)
 → Position Sizing → Portfolio Constraints → Rebalancing
 → New Portfolio → Return − Transaction Costs → Reward
 ```
@@ -116,29 +118,40 @@ Ein positives bzw. negatives Alpha signalisiert eine erwartete positive bzw. neg
 
 Als erste Risikoschätzung dient die historische rollierende Volatilität $\sigma_{i,t}$. Sie wird für jede Aktie `i` zum Zeitpunkt `t` aus den vergangenen Returns eines festgelegten Zeitfensters berechnet, beispielsweise aus den letzten 20 oder 60 Handelstagen.
 
-Alpha und Risiko werden zu einem risikoadjustierten Signal kombiniert:
+Alpha und Risiko werden zu einem signierten risikoadjustierten Signal
+kombiniert:
 
 ```math
 z_{i,t}
 =
-\frac{|\alpha_{i,t}|}{\sigma_{i,t}}
+\frac{\alpha_{i,t}}{\sigma_{i,t}}
 ```
 
 Dabei bezeichnet:
 
 - $\alpha_{i,t}$ den Alpha-Score der Aktie `i` zum Zeitpunkt `t`
-- $|\alpha_{i,t}|$ die Stärke des Signals unabhängig von seiner Richtung
 - $\sigma_{i,t}$ die geschätzte Volatilität bzw. das Risiko der Aktie
-- $z_{i,t}$ die risikoadjustierte Signalstärke
+- $z_{i,t}$ das signierte risikoadjustierte Signal
 
-Ein starkes Alpha bei geringer Volatilität erzeugt somit einen höheren Wert als ein gleich starkes Alpha bei hohem Risiko.
+Für das Position Sizing wird zusätzlich die richtungsunabhängige
+risikoadjustierte Opportunity verwendet:
+
+```math
+q_{i,t}
+=
+\frac{|\alpha_{i,t}|/(\sigma_{i,t}+\varepsilon)}
+{\sum_{j=1}^{N}|\alpha_{j,t}|/(\sigma_{j,t}+\varepsilon)}
+```
+
+Ein starkes Alpha bei geringer Volatilität erzeugt somit eine höhere
+Opportunity als ein gleich starkes Alpha bei hohem Risiko.
 
 Anschließend wird $z_{i,t}$ über alle `N` Aktien des zum Zeitpunkt `t` betrachteten Universums normalisiert:
 
 ```math
 q_{i,t}
 =
-\frac{z_{i,t}}{\sum_{j=1}^{N}z_{j,t}}
+\frac{|z_{i,t}|}{\sum_{j=1}^{N}|z_{j,t}|}
 ```
 
 Der Index `j` iteriert dabei über alle Aktien des aktuellen Universums. Der Nenner ist die Summe ihrer risikoadjustierten Signalstärken. Dadurch gilt:
@@ -147,42 +160,60 @@ Der Index `j` iteriert dabei über alle Aktien des aktuellen Universums. Der Nen
 \sum_{i=1}^{N}q_{i,t}=1
 ```
 
-$q_{i,t}$ beschreibt den relativen Anteil der risikoadjustierten Opportunity einer Aktie und dient später dem Position Sizing. Für die Implementierung sollte im Nenner von $z_{i,t}$ zusätzlich ein kleiner Wert $\varepsilon$ berücksichtigt werden, damit eine Volatilität von null nicht zu einer Division durch null führt.
+$q_{i,t}$ beschreibt den relativen Anteil der risikoadjustierten Opportunity
+einer Aktie und dient dem Position Sizing. In der Implementierung wird
+$\varepsilon$ direkt zur Volatilität addiert, damit eine Volatilität von null
+nicht zu einer Division durch null führt.
 
 ## 5. RL Environment
 
-Als erste Implementierung wird PPO mit einem Multi-Discrete Action Space verwendet. Der Agent verarbeitet die von XGBoost erzeugten Alpha-Scores zusammen mit Risiko-, Markt- und Portfolioinformationen und erzeugt für jede Aktie eine Buy-, Hold- oder Sell-Aktion.
+Als aktuelle Implementierung wird PPO mit einem Multi-Discrete Action Space
+verwendet. Der Agent verarbeitet die von XGBoost erzeugten Alpha-Scores,
+Risiko-, Markt- und Portfolioinformationen sowie die aktuelle Alpha-Regel.
+Die Fundamentaldaten werden dem PPO-Agenten nicht direkt übergeben, sondern
+wirken über die Alpha-Scores des vorgelagerten Alpha-Modells.
 
 Das RL Environment verbindet das mit XGBoost implementierte Alpha-Modell mit der Portfolio-Simulation. Zu jedem Rebalancing-Zeitpunkt `t` erhält der Agent einen State, wählt Aktionen und bekommt nach deren Ausführung einen Reward.
 
 ### State Space
 
-Ein möglicher State ist:
+Der implementierte Basis-State enthält pro Aktie Alpha, die normalisierte
+risikoadjustierte Opportunity $q$, das signierte risikoadjustierte Alpha, das
+aktuelle Aktiengewicht, den Return und die Haltedauer. Zusätzlich werden Cash
+und bei der Residual-Umgebung die aktuelle Regelaktion angehängt:
 
 ```math
 s_t=
 [
 \boldsymbol{\alpha}_t,
-\boldsymbol{\sigma}_t,
+\mathbf{q}_t,
+\mathbf{z}_t,
 \mathbf{w}_{t-1},
+cash_t,
 \mathbf{r}_t,
-\mathbf{m}_t
+\mathbf{h}_t,
+\mathbf{rule}_t
 ]
 ```
 
 Dabei bezeichnet:
 
 - $\boldsymbol{\alpha}_t$: von XGBoost erzeugte Alpha-Scores für alle `N` Aktien
-- $\boldsymbol{\sigma}_t$: geschätzte Volatilitäten dieser Aktien
+- $\mathbf{q}_t$: normalisierte risikoadjustierte Opportunity je Aktie
+- $\mathbf{z}_t$: signiertes Alpha geteilt durch die Volatilität
 - $\mathbf{w}_{t-1}$: aktuelle Portfolio-Gewichte einschließlich Cash
-- $\mathbf{r}_t$: vergangene bzw. aktuelle Returns
-- $\mathbf{m}_t$: zusätzliche Markt- oder Regimeinformationen
+- $cash_t$: aktueller Cash-Anteil
+- $\mathbf{r}_t$: aktueller Return je Aktie
+- $\mathbf{h}_t$: Haltedauer je Aktie
+- $\mathbf{rule}_t$: aktuelle Alpha-Regelaktion im Residual-Setup
 
-Der State $s_t$ ist somit der Input des RL-Agenten. Die Bestandteile werden typischerweise zu einem numerischen Vektor zusammengeführt und vor dem Training skaliert.
+Der Basis-State hat die Dimension $6N+1$. Im Residual-Setup wird die
+Regelaktion angehängt, sodass die Beobachtung die Dimension $7N+1$ besitzt.
+Die Beobachtungen werden mit `VecNormalize` normalisiert.
 
 ### Action Space
 
-Der Output des Agenten ist für jede Aktie `i` eine diskrete Aktion:
+Im direkten Environment entspricht die diskrete Aktion für jede Aktie `i`:
 
 ```math
 a_{i,t}\in\{-1,0,+1\},
@@ -190,26 +221,45 @@ a_{i,t}\in\{-1,0,+1\},
 -1=SELL,\;0=HOLD,\;+1=BUY
 ```
 
-Über alle `N` Aktien entsteht der Aktionsvektor:
+In der aktuell für Training und Evaluation verwendeten Residual-Umgebung
+gibt PPO stattdessen pro Aktie eine Residualaktion aus:
+
+```text
+0 = Down, 1 = Keep, 2 = Up
+```
+
+`Keep` übernimmt die Alpha-Regel. `Down` bzw. `Up` verschieben die
+Regelaktion um einen Schritt in Richtung Sell bzw. Buy. Erst daraus entsteht
+die tatsächlich ausgeführte finale Aktion `Sell`, `Hold` oder `Buy`.
+
+Über alle `N` Aktien entsteht jeweils ein Aktionsvektor:
 
 ```math
 \mathbf{a}_t=
 [a_{1,t},a_{2,t},\ldots,a_{N,t}]
 ```
 
-Der Agent entscheidet damit, **ob und in welche Richtung** gehandelt wird, nicht über die Positionsgröße. Diese wird anschließend durch die separate Position-Sizing-Regel berechnet.
+Der Agent entscheidet damit über die Handelsrichtung, nicht über die
+Positionsgröße. Diese wird anschließend durch die separate Position-Sizing-
+Regel berechnet.
 
 ### Implementation Approach
 
 XGBoost und der PPO-Agent werden getrennt trainiert. Zuerst wird XGBoost auf historischen Features und zukünftigen Renditen trainiert. Seine Point-in-Time-Prognosen werden anschließend zusammen mit Risiko-, Markt- und Portfolioinformationen als Input des RL-Agenten verwendet.
 
-Die PPO-Policy erzeugt für jede Aktie drei Wahrscheinlichkeiten für Buy, Hold und Sell. Nach Auswahl und Ausführung der Aktionen berechnet das Environment die Positionsgrößen, wendet die Portfolio Constraints an und bestimmt die neuen Portfolio-Gewichte, Transaktionskosten, Portfoliorendite und den Reward.
+Die PPO-Policy erzeugt für jede Aktie drei Wahrscheinlichkeiten für Down,
+Keep und Up. Die Residual-Umgebung kombiniert die gewählte Residualaktion mit
+der Alpha-Regel und übergibt die finale Sell/Hold/Buy-Aktion an das Trading-
+Environment. Dieses berechnet die Positionsänderungen, wendet die Portfolio
+Constraints an und bestimmt neue Portfolio-Gewichte, Transaktionskosten,
+Portfoliorendite und Reward.
 
 Eine gemeinsame Klassifikation aller Aktionskombinationen wird vermieden, da bei `N` Aktien bereits $3^N$ Kombinationen entstehen. Stattdessen verwendet PPO eine separate diskrete Aktionsverteilung pro Aktie. Geeignete DQN-Varianten können später als Vergleich untersucht werden.
 
 ## 6. Risk-Adjusted Position Sizing
 
-Die Position-Sizing-Regel übersetzt die diskrete RL-Aktion in eine konkrete Veränderung des Portfolio-Gewichts:
+Die Position-Sizing-Regel übersetzt die ausgeführte finale Handelsrichtung in
+eine konkrete Veränderung des Portfolio-Gewichts:
 
 ```math
 \Delta w_{i,t}
@@ -220,7 +270,7 @@ a_{i,t}\cdot B_t\cdot q_{i,t}
 Dabei bezeichnet:
 
 - $\Delta w_{i,t}$ die Veränderung des Portfolio-Gewichts der Aktie `i` zum Zeitpunkt `t`
-- $a_{i,t}\in\{-1,0,+1\}$ die RL-Aktion Sell, Hold oder Buy
+- $a_{i,t}\in\{-1,0,+1\}$ die finale Aktion Sell, Hold oder Buy
 - $B_t$ das maximal verfügbare Rebalancing-Budget
 - $q_{i,t}$ die in **Abschnitt 4 „Risk Estimation & Risk-Adjusted Alpha“** berechnete relative risikoadjustierte Signalstärke
 
@@ -283,17 +333,28 @@ Weitere Risikoterme können später experimentell ergänzt werden. Sharpe Ratio,
 
 ## 9. Baselines & Evaluation
 
-Alle Varianten werden auf identischen Daten und Testzeiträumen verglichen:
+Die primäre Evaluation vergleicht zwei separat trainierte Residual-PPO-
+Systeme:
 
-1. **Buy & Hold**
-2. **Equal Weight**
-3. **Alpha Model + regelbasiertes Position Sizing**
-4. **Alpha Model + Risk-Adjusted Position Sizing**
-5. **Alpha Model + Risk-Adjusted Position Sizing + RL**
+1. **`market_only`**: Alpha-Modell mit marktbezogenen Merkmalen
+2. **`full_alpha`**: Alpha-Modell mit Markt- und Fundamentaldaten
+
+Beide PPO-Systeme verwenden denselben chronologischen Testsplit, dieselbe
+Environment-Konfiguration und einen deterministischen Rollout. Die PPO-
+Rollouts und die Referenzportfolios werden auf demselben Return-Fenster mit
+91 Perioden ausgewertet. Als wirtschaftliche Referenzen werden **Buy-and-
+Hold** und **Equal Weight** berichtet. Sie verwenden zwar dasselbe
+Return-Fenster, aber nicht die PPO-konsistente Cash-Ausgangslage und keine
+PPO-Environment-Transaktionskosten.
+
+Alpha-Ranking, direkte Alpha-Regelportfolios und historische Regel-Baselines
+sind ergänzende Diagnostik und nicht der primäre PPO-Vergleich.
 
 Die zentrale Forschungsfrage lautet:
 
-> Liefert der RL-Agent zusätzlichen Nutzen gegenüber einer direkten regelbasierten Verwendung derselben Alpha-Signale?
+> Welchen zusätzlichen Nutzen liefern Fundamentaldaten gegenüber reinen
+> Marktdaten für datengetriebene Handelsentscheidungen in einem hybriden
+> System aus Alpha-Prognose und Reinforcement Learning?
 
 ## 10. Component Responsibilities
 
@@ -304,7 +365,11 @@ Alpha Model          Wie attraktiv ist die Aktie?
         ↓
 Risk Adjustment      Wie stark ist das Signal relativ zum Risiko?
         ↓
-RL Agent             Buy, Hold oder Sell?
+Alpha Rule           Baseline-Handelsrichtung
+        ↓
+RL Agent             Residual Down, Keep oder Up
+        ↓
+Final Action         Sell, Hold oder Buy
         ↓
 Position Sizing      Wie groß soll der Trade sein?
         ↓
@@ -317,7 +382,8 @@ Die Kernidee ist die klare Trennung der Verantwortlichkeiten:
 
 - **Alpha Model:** prognostiziert die zukünftige Attraktivität eines Assets.
 - **Risk Adjustment:** berücksichtigt das aktuelle Risiko.
-- **RL Agent:** trifft kontextabhängige Buy/Hold/Sell-Entscheidungen.
+- **RL Agent:** modifiziert die Alpha-Regel über Residualaktionen.
+- **Final Action:** ergibt die tatsächlich ausgeführte Sell/Hold/Buy-Richtung.
 - **Position Sizing:** berechnet daraus konkrete Positionsänderungen.
 - **Portfolio Layer:** setzt Constraints durch und bestimmt die tatsächlich ausführbaren Trades.
 
