@@ -29,7 +29,7 @@
 | --- | --- |
 | **Python 3.13** | Version ist in [.python-version](.python-version) fixiert (`requires-python >=3.13,<3.14`). |
 | **[uv](https://docs.astral.sh/uv/)** | Package- und Environment-Manager. Verwaltet Python-Version, `.venv` und `uv.lock`. |
-| **Git** | Wird für den Klon **und** für die als Git-Abhängigkeit eingebundene Data-Pipeline benötigt. |
+| **Git** | Wird für den Klon **und** für die Data-Pipeline benötigt (`uv sync` klont [gitlab.lrz.de](https://gitlab.lrz.de/daniel.maier/rl-ss26-market-data-pipeline); LRZ-Zugang erforderlich). |
 
 ---
 
@@ -47,8 +47,9 @@ cd rl-fundamental-trading
 **2. Umgebung einrichten** (Python 3.13 via uv)
 
 ```bash
-# uv installieren, falls noch nicht vorhanden (macOS/Linux):
-curl -LsSf https://astral.sh/uv/install.sh | sh
+# uv installieren, falls noch nicht vorhanden:
+#   macOS/Linux:  curl -LsSf https://astral.sh/uv/install.sh | sh
+#   Windows:      powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 
 uv python install        # installiert Python 3.13 aus .python-version
 ```
@@ -75,7 +76,7 @@ uv run python pipeline/train_alpha_model.py
 # Konsole zeigt u. a. den Information Coefficient (ic) auf dem Validation-Split
 ```
 
-**6. RL-Agent trainieren** (PPO, nutzt das Alpha-Artefakt aus Schritt 6)
+**6. RL-Agent trainieren** (PPO, nutzt das Alpha-Artefakt aus Schritt 5)
 
 ```bash
 # Schneller Smoke-Test (~40 s auf CPU):
@@ -85,18 +86,22 @@ OMP_NUM_THREADS=1 KMP_DUPLICATE_LIB_OK=TRUE \
 # Vollständiger Lauf (Default = 200_000 Timesteps):
 OMP_NUM_THREADS=1 KMP_DUPLICATE_LIB_OK=TRUE \
   uv run python pipeline/train_ppo.py
-# → Artefakt: models/rl/artifacts/ppo_agent · Metriken: eval/ppo_training_metrics.json
+# → Artefakt: models/rl/artifacts/ppo_agent.zip · Metriken: eval/ppo_training_metrics.json
 #   Portfolio-Verläufe: eval/ppo_train_portfolio.csv, eval/ppo_validation_portfolio.csv
 ```
 
 > Unter Linux/Windows können die `OMP_*`-Prefixe in der Regel entfallen.
 
-**7. Evaluation** (Alpha-Qualität + regelbasierte Baselines auf Train/Validation)
+**7. Evaluation** (Alpha-Qualität + Regel-Baselines; braucht alle drei Feature-Sets)
 
 ```bash
-uv run python pipeline/eval_comparison.py       # → eval/comparison.json
-uv run python pipeline/eval_rule_baselines.py   # → eval/alpha_rule_baselines.json
+uv run python pipeline/train_alpha_model.py --feature-set market
+uv run python pipeline/train_alpha_model.py --feature-set no_levels
+uv run python pipeline/eval_comparison.py --splits train,validation
+# → eval/comparison.json, eval/alpha_rule_baselines.json
 ```
+
+PPO-Vergleich (`full` vs. `market`): [eval/README.md](eval/README.md).
 
 **8. (Optional) Tests ausführen**
 
