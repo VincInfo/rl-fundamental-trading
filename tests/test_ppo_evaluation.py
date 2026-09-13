@@ -193,6 +193,41 @@ def test_ppo_rollout_reports_final_and_residual_actions_separately():
     assert metrics["action_share_hold"] < 1.0
 
 
+def test_ppo_rollout_includes_first_realized_return():
+    features = make_synthetic_features(n_stocks=4, n_days=80, seed=7)
+    alpha = _random_alpha_wide(features, seed=7)
+    panel = build_panel(features, alpha, vol_window=10)
+
+    def make_env():
+        return ResidualAlphaEnv(MultiStockTradingEnv(panel, min_holding_days=2))
+
+    env = VecNormalize(
+        DummyVecEnv([make_env]),
+        norm_obs=False,
+        norm_reward=False,
+    )
+
+    class KeepPolicy:
+        def predict(self, obs, deterministic=True):
+            del obs, deterministic
+            return np.full((1, 4), RESIDUAL_KEEP, dtype=np.int64), None
+
+    metrics = ppo_rollout_metrics(KeepPolicy(), env)  # type: ignore[arg-type]
+
+    obs = env.reset()
+    log_returns = []
+    done = False
+    while not done:
+        action, _ = KeepPolicy().predict(obs)
+        obs, _, dones, infos = env.step(action)
+        log_returns.append(float(infos[0]["log_return"]))
+        done = bool(dones[0])
+
+    expected_return = float(np.exp(np.sum(log_returns)) - 1.0)
+    assert metrics["n_steps"] == episode_length(80)
+    np.testing.assert_allclose(metrics["cumulative_return"], expected_return)
+
+
 def test_init_keep_logit_bias_shifts_keep_channel():
     import torch
     from torch import nn

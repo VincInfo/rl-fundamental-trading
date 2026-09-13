@@ -153,7 +153,6 @@ def ppo_rollout_metrics(model: PPO, env: VecNormalize) -> dict[str, float]:
     actions: list[np.ndarray] = []
     residual_actions: list[np.ndarray] = []
     done = False
-    previous_value = None
     while not done:
         action, _ = model.predict(obs, deterministic=True)
         obs, reward, dones, infos = env.step(action)
@@ -163,10 +162,9 @@ def ppo_rollout_metrics(model: PPO, env: VecNormalize) -> dict[str, float]:
         residual_actions.append(
             np.asarray(info.get("residual_action", action)).reshape(-1)
         )
-        value = float(info["portfolio_value"])
-        if previous_value is not None:
-            returns.append(float(np.log(value / previous_value)))
-        previous_value = value
+        # The environment reports the return realized by this step, including
+        # the first trade from the initial portfolio state.
+        returns.append(float(info["log_return"]))
         rewards.append(float(reward[0]))
         turnovers.append(float(info["turnover"]))
         costs.append(float(info["transaction_cost"]))
