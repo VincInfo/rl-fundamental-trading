@@ -3,6 +3,7 @@ import math
 import numpy as np
 import pandas as pd
 from stable_baselines3.common.env_checker import check_env
+from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from eval.ppo import (
     action_shares,
@@ -13,6 +14,12 @@ from eval.ppo import (
     make_alpha_quantile_policy,
     make_alpha_rule_policy,
     rollout_fixed_policy,
+)
+from models.rl.evaluation import (
+    compare_metric_sets,
+    comparison_metrics,
+    ppo_rollout_metrics,
+    reference_portfolio_metrics,
 )
 from models.rl.panel import build_panel
 from models.rl.residual import (
@@ -52,12 +59,42 @@ def test_action_shares_counts_buy_hold_sell():
     assert shares["buy"] == 3 / 6
 
 
+def test_comparison_metrics_are_stable_and_include_delta():
+    market = {"cumulative_return": 0.1, "sharpe_ratio": 1.0, "n_steps": 4}
+    full = {"cumulative_return": 0.2, "sharpe_ratio": 1.5, "n_steps": 4}
+    result = compare_metric_sets(market, full)
+    assert set(result["market_only"]) == set(result["full_alpha"])
+    assert result["full_alpha"]["cumulative_return"] == 0.2
+    assert result["delta_full_minus_market"]["sharpe_ratio"] == 0.5
+    assert comparison_metrics({})["mean_turnover"] == 0.0
+
+
+def test_comparison_metrics_do_not_hide_missing_primary_metrics():
+    result = comparison_metrics({"cumulative_return": 0.25})
+    assert result["cumulative_return"] == 0.25
+    assert "sharpe_ratio" in result
+
+
 def test_equal_weight_mean_log_return_is_finite():
     features = make_synthetic_features(n_stocks=4, n_days=80, seed=3)
     alpha = _random_alpha_wide(features, seed=3)
     panel = build_panel(features, alpha, vol_window=10)
     value = equal_weight_mean_log_return(panel)
     assert math.isfinite(value)
+
+
+def test_reference_portfolios_have_expected_metrics():
+    features = make_synthetic_features(n_stocks=4, n_days=80, seed=3)
+    metrics = reference_portfolio_metrics(features)
+    assert set(metrics) == {"buy_and_hold", "equal_weight"}
+    assert all(metrics[name]["n_steps"] == 80 for name in metrics)
+    assert all(math.isfinite(value) for row in metrics.values() for value in row.values())
+
+
+def test_reference_portfolios_can_match_ppo_return_window():
+    features = make_synthetic_features(n_stocks=4, n_days=80, seed=3)
+    metrics = reference_portfolio_metrics(features, start_index=2)
+    assert all(metrics[name]["n_steps"] == 78 for name in metrics)
 
 
 def test_alpha_quantile_actions_buys_top_and_sells_bottom():
@@ -127,6 +164,33 @@ def test_residual_observation_appends_signed_rule_action():
     rule = np.asarray(info["rule_action"], dtype=np.float64)
     assert obs.shape[-1] == ResidualAlphaEnv.observation_dim(base.n_stocks)
     np.testing.assert_allclose(obs[-base.n_stocks :], rule - 1.0)
+
+
+def test_ppo_rollout_reports_final_and_residual_actions_separately():
+    features = make_synthetic_features(n_stocks=4, n_days=80, seed=6)
+    alpha = _random_alpha_wide(features, seed=6)
+    panel = build_panel(features, alpha, vol_window=10)
+
+    def make_env():
+        return ResidualAlphaEnv(MultiStockTradingEnv(panel, min_holding_days=2))
+
+    env = VecNormalize(
+        DummyVecEnv([make_env]),
+        norm_obs=False,
+        norm_reward=False,
+    )
+
+    class KeepPolicy:
+        def predict(self, obs, deterministic=True):
+            del deterministic
+            return np.full((1, 4), RESIDUAL_KEEP, dtype=np.int64), None
+
+    metrics = ppo_rollout_metrics(KeepPolicy(), env)  # type: ignore[arg-type]
+
+    assert metrics["residual_action_share_down"] == 0.0
+    assert metrics["residual_action_share_keep"] == 1.0
+    assert metrics["residual_action_share_up"] == 0.0
+    assert metrics["action_share_hold"] < 1.0
 
 
 def test_init_keep_logit_bias_shifts_keep_channel():
