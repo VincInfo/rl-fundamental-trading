@@ -4,105 +4,135 @@
 
 Das System trennt **Prognose**, **Handelsentscheidung** und **Positionsgröße**:
 
-- Das **Alpha-Modell** prognostiziert die Attraktivität einer Aktie.
-- Das **Risk Adjustment** setzt das Signal ins Verhältnis zum Risiko.
-- Das **RL-Environment** kombiniert eine Alpha-Regel mit den Residualaktionen
-        des PPO-Agenten.
-- Das **Position Sizing** übersetzt Aktion und Signalstärke in eine Trade-Größe.
+- Das **Alpha-Modell** (XGBoost) prognostiziert die Attraktivität einer Aktie.
+- Das **Risk Adjustment** setzt das Signal ins Verhältnis zur rollierenden Volatilität.
+- Die **Alpha-Regel** liefert eine Baseline-Handelsrichtung.
+- Das **RL-Environment** kombiniert diese Regel mit Residualaktionen des PPO-Agenten.
+- Das **Position Sizing** übersetzt die finale Aktion und die Signalstärke in eine Trade-Größe.
 - **Portfolio Constraints** begrenzen die resultierenden Positionen und Trades.
 
 ```text
 Market + Fundamental Data → Feature Engineering → Alpha Model
-→ Alpha Scores → Alpha Rule → PPO Residual Policy (Down/Keep/Up)
+→ Alpha Scores → Alpha Rule (z-score) → PPO Residual Policy (Down/Keep/Up)
 → finale Aktion (Sell/Hold/Buy)
 → Position Sizing → Portfolio Constraints → Rebalancing
-→ New Portfolio → Return − Transaction Costs → Reward
+→ New Portfolio → Log-Return nach Kosten − Trade Penalty + Alignment → Reward
 ```
+
+Training und Evaluation nutzen standardmäßig die Residual-Umgebung. Das direkte
+Environment (absolute Sell/Hold/Buy-Aktionen) bleibt als Ablation verfügbar.
 
 ## 2. Data & Features
 
-Verwendet werden Marktdaten wie Preise, Returns, Volumen, Volatilität, Momentum und Markt-/Indexinformationen sowie Fundamentaldaten wie Wachstum, Margen, ROE/ROIC, Verschuldung, P/E, EV/EBITDA und weitere Accounting- oder Bewertungskennzahlen.
+Das Universum umfasst `N = 20` Aktien:
 
-Alle Daten und daraus berechneten Features müssen Point-in-Time korrekt sein: Zum Zeitpunkt `t` dürfen nur tatsächlich veröffentlichte und verfügbare Informationen eingehen. Das gilt besonders für Fundamentaldaten und verhindert Look-Ahead Bias. Das Feature Engineering berechnet und normalisiert daraus unter anderem Returns verschiedener Horizonte, Momentum, Volatilität und fundamentale Kennzahlen (je nach dem was Edgar hergibt).
+```text
+AAPL, MSFT, NVDA, IBM, CSCO, TXN, AMAT, CRM, MU, LRCX,
+TSLA, LOW, TGT, PEP, COST, MDLZ, JNJ, LLY, ISRG, ADP
+```
+
+Marktdaten stammen aus OHLCV (Yahoo Finance). Fundamentaldaten kommen aus den
+SEC-EDGAR Company Facts (10-Q / 10-K) und werden Point-in-Time auf den
+Marktindex projiziert: Zum Zeitpunkt `t` dürfen nur bereits veröffentlichte
+Filings eingehen. Features und Labels werden auf der ersten Stundenbar jedes
+Kalendertags berechnet (`sample_daily=True`), sodass Alpha-Modell und PPO
+denselben Rebalancing-Zeitpunkt verwenden. Die Splits sind chronologisch
+(Training / Validation / Test) und werden nicht gemischt.
+
+### Market Features
+
+Aus Open, High, Low, Close und Volume:
+
+- `return_1d`, `return_5d`, `momentum_20d`, `vol_20d`
+- `oc_return`, `hl_range`
+- `volume_change_1d`, `rel_volume_20d`
+
+### Fundamental Features
+
+Nur im Feature-Set `full` bzw. in der Ablation `no_levels`:
+
+- Levels: `roe`, `gross_margin`, `debt_to_equity`
+- Flows (nur als Deltas, nicht als Rohwerte): `revenue`, `net_income`,
+  `operating_cashflow`
+- Context / Events: `filing_lag_days`, `filing_recency`, `post_filing_5d`
+- Changes: `delta_*` der Levels und Flows
+- Cross-Section-Ranks: `rank_roe`, `rank_gross_margin`, `rank_debt_to_equity`
+  sowie `rank_delta_*` der Flows
+
+P/E, EV/EBITDA oder ROIC werden nicht verwendet. `no_levels` behält Deltas,
+Filing-Features und Flow-Ranks, lässt aber sticky Accounting-Levels und deren
+Ranks weg.
 
 ## 3. Alpha Model
 
-Als erste Implementierung wird XGBoost als überwachtes Alpha-Modell verwendet. Das Modell prognostiziert für jede Aktie eine zukünftige Rendite, die anschließend als Alpha-Score dient. LightGBM kann später als Vergleichsmodell untersucht werden.
+XGBoost ist das implementierte Alpha-Modell. LightGBM ist nicht vorhanden.
+Es gibt drei Feature-Sets:
+
+1. **`market`**: nur Market Features
+2. **`full`**: Market- plus Fundamental-Features (Default)
+3. **`no_levels`**: Fundamentals ohne sticky Levels; ergänzende Ablation
 
 ### Input & Output
 
-Das Alpha-Modell wird für jede Aktie `i` und jeden Entscheidungszeitpunkt `t` angewendet. Sein Input ist ein Feature-Vektor:
+Das Alpha-Modell wird für jede Aktie `i` und jeden Entscheidungszeitpunkt `t`
+angewendet. Sein Input ist ein Feature-Vektor:
 
 ```math
 \mathbf{x}_{i,t}
 =
 [
 \text{Market Features}_{i,t},
-\text{Fundamental Features}_{i,t},
-\text{Context Features}_t
+\text{Fundamental Features}_{i,t}
 ]
 ```
 
-Dabei steht $\mathbf{x}_{i,t}$ für alle zum Zeitpunkt `t` verfügbaren Informationen zur Aktie `i`. Dazu gehören beispielsweise vergangene Returns, Momentum, Volatilität, Volumen, relative Performance, Wachstum, Margen, ROE/ROIC, Verschuldung und Bewertungskennzahlen. Context Features können zusätzlich Markt-, Sektor- oder Regimeinformationen enthalten.
+Im Feature-Set `market` entfallen die Fundamental Features. Alle Inputs müssen
+**Point-in-Time korrekt** sein.
 
-Alle Features müssen **Point-in-Time korrekt** sein: Es dürfen nur Informationen verwendet werden, die zum Zeitpunkt `t` tatsächlich bekannt waren.
-
-Das Trainingsziel $y_{i,t}$ ist beispielsweise die nach `H` Handelstagen realisierte Rendite:
+Der Prognosehorizont ist `H = 20` Handelstage. Das Trainingsziel ist die
+**aktive** Forward-Rendite relativ zum gleichgewichteten Cross-Section-Mittel
+desselben Tages, nicht die absolute Rendite und nicht ein externer Index:
 
 ```math
 y_{i,t}
 =
 r_{i,t\rightarrow t+H}
+-
+\frac{1}{N}\sum_{j=1}^{N} r_{j,t\rightarrow t+H}
+```
+
+mit
+
+```math
+r_{i,t\rightarrow t+H}
 =
 \frac{P_{i,t+H}}{P_{i,t}}-1
 ```
 
-Dabei bezeichnet:
-
-- $P_{i,t}$ den Preis der Aktie `i` zum Entscheidungszeitpunkt `t`
-- $P_{i,t+H}$ den Preis nach `H` Handelstagen
-- `H` den Prognosehorizont
-- $y_{i,t}$ die tatsächliche zukünftige Rendite, die im Training als Zielwert dient
-
-Alternativ kann eine markt- oder sektorbereinigte Rendite verwendet werden:
-
-```math
-y_{i,t}^{active}
-=
-r_{i,t\rightarrow t+H}
--
-r_{benchmark,t\rightarrow t+H}
-```
-
-
-Hier beschreibt $y_{i,t}^{active}$ die Rendite der Aktie abzüglich der Rendite eines Benchmarks im gleichen Zeitraum. Das Modell prognostiziert dann nicht die absolute Entwicklung, sondern die erwartete Out- oder Underperformance.
-
-
-XGBoost lernt aus den historischen Trainingsdaten die Abbildung:
+XGBoost lernt die Abbildung
 
 ```math
 f_\theta(\mathbf{x}_{i,t})
 \rightarrow
-\hat r_{i,t+H}
+\hat y_{i,t}
 ```
 
-Dabei ist $f_\theta$ das Alpha-Modell mit den gelernten Modellparametern $\theta$. Es verarbeitet den Feature-Vektor $x_{i,t}$ und prognostiziert mit $\hat r_{i,t+H}$ die Rendite der Aktie über die nächsten `H` Handelstage.
-
-Der Modelloutput wird als Alpha-Score verwendet:
+Der Modelloutput ist der Alpha-Score:
 
 ```math
 \alpha_{i,t}
 =
-\hat r_{i,t+H}
+\hat y_{i,t}
 ```
 
 Damit gilt:
 
-- $\alpha_{i,t}>0$: erwartete positive Entwicklung
-- $\alpha_{i,t}<0$: erwartete negative Entwicklung
+- $\alpha_{i,t}>0$: erwartete Outperformance
+- $\alpha_{i,t}<0$: erwartete Underperformance
 - $|\alpha_{i,t}|$: Stärke der Prognose
 
-Für einen Rebalancing-Zeitpunkt werden die Prognosen aller `N` betrachteten Aktien zu einem Alpha-Vektor zusammengefasst:
+Für einen Rebalancing-Zeitpunkt werden die Prognosen aller `N` Aktien zu einem
+Alpha-Vektor zusammengefasst:
 
 ```math
 \boldsymbol{\alpha}_t
@@ -110,77 +140,71 @@ Für einen Rebalancing-Zeitpunkt werden die Prognosen aller `N` betrachteten Akt
 [\alpha_{1,t},\alpha_{2,t},\ldots,\alpha_{N,t}]
 ```
 
-Dabei bezeichnet `N` die Anzahl der Aktien im aktuellen Universum. Der Alpha-Vektor enthält somit für jede Aktie genau einen prognostizierten Alpha-Score. Er wird anschließend für das Risk Adjustment und als Bestandteil des States des RL-Agenten verwendet.
-
-Ein positives bzw. negatives Alpha signalisiert eine erwartete positive bzw. negative Entwicklung; der Betrag beschreibt die Signalstärke.
+Dieser Vektor geht in Risk Adjustment, Alpha-Regel und RL-State ein.
 
 ## 4. Risk Estimation & Risk-Adjusted Alpha
 
-Als erste Risikoschätzung dient die historische rollierende Volatilität $\sigma_{i,t}$. Sie wird für jede Aktie `i` zum Zeitpunkt `t` aus den vergangenen Returns eines festgelegten Zeitfensters berechnet, beispielsweise aus den letzten 20 oder 60 Handelstagen.
+Die Risikoschätzung ist die rollierende Volatilität der täglichen Returns über
+`vol_window = 20` Handelstage:
 
-Alpha und Risiko werden zu einem signierten risikoadjustierten Signal
-kombiniert:
+```math
+\sigma_{i,t}
+=
+\mathrm{std}(r_{i,t-19},\ldots,r_{i,t})
+```
+
+Alpha und Risiko werden zu einem signierten Signal kombiniert. Gegen Division
+durch null wird $\varepsilon = 10^{-8}$ zur Volatilität addiert:
 
 ```math
 z_{i,t}
 =
-\frac{\alpha_{i,t}}{\sigma_{i,t}}
+\frac{\alpha_{i,t}}{\sigma_{i,t}+\varepsilon}
 ```
 
-Dabei bezeichnet:
-
-- $\alpha_{i,t}$ den Alpha-Score der Aktie `i` zum Zeitpunkt `t`
-- $\sigma_{i,t}$ die geschätzte Volatilität bzw. das Risiko der Aktie
-- $z_{i,t}$ das signierte risikoadjustierte Signal
-
-Für das Position Sizing wird zusätzlich die richtungsunabhängige
-risikoadjustierte Opportunity verwendet:
+Für das Position Sizing wird die richtungsunabhängige, auf Summe 1
+normalisierte Opportunity verwendet:
 
 ```math
 q_{i,t}
 =
 \frac{|\alpha_{i,t}|/(\sigma_{i,t}+\varepsilon)}
 {\sum_{j=1}^{N}|\alpha_{j,t}|/(\sigma_{j,t}+\varepsilon)}
-```
-
-Ein starkes Alpha bei geringer Volatilität erzeugt somit eine höhere
-Opportunity als ein gleich starkes Alpha bei hohem Risiko.
-
-Anschließend wird $z_{i,t}$ über alle `N` Aktien des zum Zeitpunkt `t` betrachteten Universums normalisiert:
-
-```math
-q_{i,t}
 =
 \frac{|z_{i,t}|}{\sum_{j=1}^{N}|z_{j,t}|}
 ```
 
-Der Index `j` iteriert dabei über alle Aktien des aktuellen Universums. Der Nenner ist die Summe ihrer risikoadjustierten Signalstärken. Dadurch gilt:
-
-```math
-\sum_{i=1}^{N}q_{i,t}=1
-```
-
-$q_{i,t}$ beschreibt den relativen Anteil der risikoadjustierten Opportunity
-einer Aktie und dient dem Position Sizing. In der Implementierung wird
-$\varepsilon$ direkt zur Volatilität addiert, damit eine Volatilität von null
-nicht zu einer Division durch null führt.
+Damit gilt $\sum_{i=1}^{N}q_{i,t}=1$, sofern die Summe der Beträge positiv
+ist; sonst ist $q_{i,t}=0$. Ein starkes Alpha bei geringer Volatilität erhält
+einen höheren Anteil als ein gleich starkes Alpha bei hohem Risiko.
 
 ## 5. RL Environment
 
-Als aktuelle Implementierung wird PPO mit einem Multi-Discrete Action Space
-verwendet. Der Agent verarbeitet die von XGBoost erzeugten Alpha-Scores,
-Risiko-, Markt- und Portfolioinformationen sowie die aktuelle Alpha-Regel.
-Die Fundamentaldaten werden dem PPO-Agenten nicht direkt übergeben, sondern
-wirken über die Alpha-Scores des vorgelagerten Alpha-Modells.
+Training und Evaluation verwenden PPO mit einem Multi-Discrete Action Space.
+Der Agent sieht Alpha-Scores, Risiko-, Markt- und Portfolioinformationen sowie
+im Residual-Setup die aktuelle Regelaktion. Fundamentaldaten gehen nicht direkt
+in den PPO-State ein, sondern nur über die Alpha-Scores.
 
-Das RL Environment verbindet das mit XGBoost implementierte Alpha-Modell mit der Portfolio-Simulation. Zu jedem Rebalancing-Zeitpunkt `t` erhält der Agent einen State, wählt Aktionen und bekommt nach deren Ausführung einen Reward.
+Ein optionaler SAC-Pfad mit kontinuierlichem Action Space `[-1, +1]^N`
+existiert, ist aber nicht der evaluierte Default.
+
+### Alpha Rule
+
+Die Default-Regel ist ein Cross-Section-Z-Score von $\boldsymbol{\alpha}_t$ mit
+Dead Zone `rule_z_threshold = 0.5` und Cost Floor
+$|\alpha_{i,t}| \ge c_{TC}$:
+
+- Buy, wenn $z^\alpha_{i,t} \ge 0.5$ und das Alpha den Cost Floor erreicht
+- Sell, wenn $z^\alpha_{i,t} \le -0.5$ und das Alpha den Cost Floor erreicht
+- sonst Hold
+
+Eine Quantile-Regel (Top/Bottom 30 %) ist implementiert, aber nicht Default.
 
 ### State Space
 
-Der implementierte Basis-State enthält pro Aktie Alpha, die normalisierte
-risikoadjustierte Opportunity $q$, das signierte risikoadjustierte Alpha, das
-aktuelle Aktiengewicht, den Return und die Haltedauer. Zusätzlich werden Cash
-und bei der Residual-Umgebung die aktuelle Regelaktion angehängt:
+Der Basis-State enthält pro Aktie Alpha, $q$, $z$, das Aktiengewicht, den
+Return und die Haltedauer in Tagen. Zusätzlich wird der Cash-Anteil
+angehängt; im Residual-Setup folgt die Regelaktion als $\{-1,0,+1\}$:
 
 ```math
 s_t=
@@ -198,68 +222,65 @@ cash_t,
 
 Dabei bezeichnet:
 
-- $\boldsymbol{\alpha}_t$: von XGBoost erzeugte Alpha-Scores für alle `N` Aktien
-- $\mathbf{q}_t$: normalisierte risikoadjustierte Opportunity je Aktie
-- $\mathbf{z}_t$: signiertes Alpha geteilt durch die Volatilität
-- $\mathbf{w}_{t-1}$: aktuelle Portfolio-Gewichte einschließlich Cash
-- $cash_t$: aktueller Cash-Anteil
-- $\mathbf{r}_t$: aktueller Return je Aktie
-- $\mathbf{h}_t$: Haltedauer je Aktie
-- $\mathbf{rule}_t$: aktuelle Alpha-Regelaktion im Residual-Setup
+- $\boldsymbol{\alpha}_t$: Alpha-Scores für alle `N` Aktien
+- $\mathbf{q}_t$: normalisierte risikoadjustierte Opportunity
+- $\mathbf{z}_t$: $\alpha_{i,t}/(\sigma_{i,t}+\varepsilon)$
+- $\mathbf{w}_{t-1}$: aktuelle Aktiengewichte (Länge $N$, ohne Cash)
+- $cash_t$: aktueller Cash-Anteil (Skalar)
+- $\mathbf{r}_t$: aktueller 1-Tages-Return je Aktie
+- $\mathbf{h}_t$: Haltedauer in Kalendertagen seit Positionsöffnung
+- $\mathbf{rule}_t$: aktuelle Alpha-Regelaktion, nur im Residual-Setup
 
-Der Basis-State hat die Dimension $6N+1$. Im Residual-Setup wird die
-Regelaktion angehängt, sodass die Beobachtung die Dimension $7N+1$ besitzt.
-Die Beobachtungen werden mit `VecNormalize` normalisiert.
+Der Basis-State hat die Dimension $6N+1$. Mit Regelaktion sind es $7N+1$.
+Beobachtungen werden mit `VecNormalize` normalisiert; der Reward bleibt
+unnormalisiert.
 
 ### Action Space
 
-Im direkten Environment entspricht die diskrete Aktion für jede Aktie `i`:
+Das Gymnasium-Environment nutzt `MultiDiscrete([3] * N)`. Intern werden die
+Codes auf Handelsrichtungen abgebildet:
 
 ```math
-a_{i,t}\in\{-1,0,+1\},
+\{0,1,2\}\mapsto\{-1,0,+1\},
 \qquad
--1=SELL,\;0=HOLD,\;+1=BUY
+0=\mathrm{SELL},\;1=\mathrm{HOLD},\;2=\mathrm{BUY}
 ```
 
-In der aktuell für Training und Evaluation verwendeten Residual-Umgebung
-gibt PPO stattdessen pro Aktie eine Residualaktion aus:
+Im Default-Residual-Setup gibt PPO pro Aktie eine Residualaktion aus:
 
 ```text
 0 = Down, 1 = Keep, 2 = Up
 ```
 
-`Keep` übernimmt die Alpha-Regel. `Down` bzw. `Up` verschieben die
-Regelaktion um einen Schritt in Richtung Sell bzw. Buy. Erst daraus entsteht
-die tatsächlich ausgeführte finale Aktion `Sell`, `Hold` oder `Buy`.
-
-Über alle `N` Aktien entsteht jeweils ein Aktionsvektor:
-
-```math
-\mathbf{a}_t=
-[a_{1,t},a_{2,t},\ldots,a_{N,t}]
-```
-
-Der Agent entscheidet damit über die Handelsrichtung, nicht über die
-Positionsgröße. Diese wird anschließend durch die separate Position-Sizing-
-Regel berechnet.
+`Keep` übernimmt die Alpha-Regel. `Down` bzw. `Up` verschieben die Regelaktion
+um einen Schritt in Richtung Sell bzw. Buy und clippen auf
+$\{\mathrm{Sell},\mathrm{Hold},\mathrm{Buy}\}$. Der Agent entscheidet über die
+Richtung, nicht über die Positionsgröße.
 
 ### Implementation Approach
 
-XGBoost und der PPO-Agent werden getrennt trainiert. Zuerst wird XGBoost auf historischen Features und zukünftigen Renditen trainiert. Seine Point-in-Time-Prognosen werden anschließend zusammen mit Risiko-, Markt- und Portfolioinformationen als Input des RL-Agenten verwendet.
+XGBoost und PPO werden getrennt trainiert. Zuerst lernt XGBoost auf
+historischen Features und aktiven 20-Tage-Renditen. Seine Point-in-Time-
+Prognosen werden danach zusammen mit Risiko- und Portfolioinformationen als
+Input des RL-Agenten verwendet.
 
-Die PPO-Policy erzeugt für jede Aktie drei Wahrscheinlichkeiten für Down,
-Keep und Up. Die Residual-Umgebung kombiniert die gewählte Residualaktion mit
-der Alpha-Regel und übergibt die finale Sell/Hold/Buy-Aktion an das Trading-
-Environment. Dieses berechnet die Positionsänderungen, wendet die Portfolio
-Constraints an und bestimmt neue Portfolio-Gewichte, Transaktionskosten,
-Portfoliorendite und Reward.
+Die Residual-Policy wird vor dem PPO-Fine-Tuning per Behavioral Cloning auf
+`Keep` warmgestartet. Zusätzlich bleiben ein KEEP-Logit-Bias (`keep_bias = 1.5`)
+und ein KEEP-Verlust auf jedem Rollout (`keep_coef = 0.08`) aktiv, damit die
+Policy nahe an der Alpha-Regel bleibt.
 
-Eine gemeinsame Klassifikation aller Aktionskombinationen wird vermieden, da bei `N` Aktien bereits $3^N$ Kombinationen entstehen. Stattdessen verwendet PPO eine separate diskrete Aktionsverteilung pro Aktie. Geeignete DQN-Varianten können später als Vergleich untersucht werden.
+Eine gemeinsame Klassifikation aller $3^N$ Aktionskombinationen wird
+vermieden. PPO verwendet eine separate diskrete Verteilung pro Aktie.
+
+Trainingsepisoden sind zufällige Fenster von 80 Schritten. Die Evaluation
+läuft deterministisch über den vollen Split.
 
 ## 6. Risk-Adjusted Position Sizing
 
-Die Position-Sizing-Regel übersetzt die ausgeführte finale Handelsrichtung in
-eine konkrete Veränderung des Portfolio-Gewichts:
+Default ist der inkrementelle Modus `rebalance_mode = "incremental"` mit
+täglicher Entscheidung (`rebalance_every = 1`). Die finale Richtung
+$a_{i,t}\in\{-1,0,+1\}$ wird mit Budget $B_t = 0.2$ und Opportunity $q_{i,t}$
+in eine Gewichtänderung übersetzt:
 
 ```math
 \Delta w_{i,t}
@@ -267,42 +288,36 @@ eine konkrete Veränderung des Portfolio-Gewichts:
 a_{i,t}\cdot B_t\cdot q_{i,t}
 ```
 
-Dabei bezeichnet:
+Ein Buy bei hohem $q_{i,t}$ kauft mehr als bei einem schwachen Signal. Hold
+lässt die Position unverändert.
 
-- $\Delta w_{i,t}$ die Veränderung des Portfolio-Gewichts der Aktie `i` zum Zeitpunkt `t`
-- $a_{i,t}\in\{-1,0,+1\}$ die finale Aktion Sell, Hold oder Buy
-- $B_t$ das maximal verfügbare Rebalancing-Budget
-- $q_{i,t}$ die in **Abschnitt 4 „Risk Estimation & Risk-Adjusted Alpha“** berechnete relative risikoadjustierte Signalstärke
-
-Ein Buy bei einem hohen $q_{i,t}$ führt zu einem größeren Kauf als bei einem schwachen Signal. Ein Sell erzeugt entsprechend eine negative Positionsänderung. Für Hold gilt $\Delta w_{i,t}=0$; die bestehende Position bleibt unverändert.
+Optional existiert der Snapshot-Modus (`rebalance_mode = "snapshot"`), der
+das Zielbuch komplett aus den Buy-/Sell-Namen neu setzt und $q$ nur innerhalb
+der jeweiligen Seite normalisiert. Er wird für den 20-Tage-Horizont-Abgleich
+(`--match-alpha-horizon`) verwendet, nicht für den täglichen Default.
 
 ## 7. Portfolio Constraints
 
-Nach dem Position Sizing werden zunächst die vorgeschlagenen Zielgewichte berechnet:
+Nach dem Position Sizing gilt im inkrementellen Modus:
 
 ```math
 w_{i,t}^{target}
 =
-w_{i,t-1}+\Delta w_{i,t}
+\mathrm{clip}(w_{i,t-1}+\Delta w_{i,t},\; 0,\; w_{max})
 ```
 
-Dabei ist $w_{i,t-1}$ das bisherige Portfolio-Gewicht und $\Delta w_{i,t}$ die in Abschnitt 6 berechnete Positionsänderung. Vor der Ausführung werden diese Zielgewichte auf einen zulässigen Portfolioraum begrenzt.
+mit $w_{max} = 0.2$. Anschließend wird die Summe der Aktiengewichte auf
+höchstens 1 skaliert. Nicht investiertes Kapital bleibt Cash. Das Environment
+startet mit 100 % Cash (`initial_cash = 1\,000\,000`).
 
-Für eine erste **Long-only-Implementierung** gilt beispielsweise:
-
-```math
-0\leq w_{i,t}\leq w_{max},
-\qquad
-\sum_i w_{i,t}\leq1
-```
-
-Damit kann keine Aktie negativ gewichtet werden, das Gewicht einer einzelnen Aktie ist auf $w_{max}$ begrenzt und das Portfolio investiert insgesamt nicht mehr als 100 % des verfügbaren Kapitals. Weitere Regeln können das Rebalancing-Budget begrenzen und Leverage ausschließen. Nicht investiertes Kapital wird als Cash gehalten.
-
-Die Constraints bilden somit die Sicherheitsschicht zwischen den vom Modell vorgeschlagenen Positionsänderungen und den tatsächlich ausgeführten Trades.
+Long-only ist Default (`allow_short = False`). Im inkrementellen Modus blockiert
+`min_holding_days = 5` Verkäufe, bevor eine neu eröffnete Long-Position diese
+Mindesthaltedauer erreicht hat. Zwischen Rebalancing-Tagen (`rebalance_every > 1`)
+werden Aktionen ignoriert und die Gewichte gehalten.
 
 ## 8. Rebalancing, Costs & Reward
 
-Nach Anwendung der Portfolio Constraints werden die zulässigen Zielgewichte durch Käufe und Verkäufe umgesetzt. Der dabei entstehende Turnover misst die gesamte tatsächlich ausgeführte Portfolioveränderung:
+Der Turnover ist die L1-Veränderung der Aktiengewichte:
 
 ```math
 Turnover_t
@@ -311,44 +326,57 @@ Turnover_t
 |w_{i,t}-w_{i,t-1}|
 ```
 
-Dabei sind $w_{i,t-1}$ und $w_{i,t}$ die Portfolio-Gewichte vor und nach dem Rebalancing. Über `i` wird dabei über alle `N` Aktien des Portfolios iteriert. Die Transaktionskosten $C_t$ können zunächst proportional zum Turnover modelliert werden:
+Transaktionskosten reduzieren den Portfoliowert proportional zum Turnover.
+Der Default-Kostensatz ist $c_{TC} = 10\,\mathrm{bp}$:
 
 ```math
-C_t=c_{TC}\cdot Turnover_t
+C_t = c_{TC}\cdot Turnover_t,
+\qquad
+V_t^{+} = V_{t}^{-}\,(1-C_t)
 ```
 
-Dabei bezeichnet $c_{TC}$ den angenommenen Kostensatz. Der Reward ergibt sich anschließend aus der Portfoliorendite nach Berücksichtigung dieser Kosten:
+Die nächste Portfoliorendite entsteht durch das Halten der neuen Positionen
+über den Folgetag. Der **Reward** ist nicht die einfache Nettorendite, sondern:
 
 ```math
 R_{t+1}
 =
-r^{portfolio}_{t+1}
+\log\!\left(\frac{V_{t+1}}{V_t^{-}}\right)
 -
-\lambda_{TC}C_t
+\lambda_{\mathrm{trade}}\cdot Turnover_t
++
+\lambda_{\mathrm{align}}\sum_{i=1}^{N} a_{i,t}\,\mathrm{sign}(\alpha_{i,t})\,q_{i,t}
 ```
 
-$r^{portfolio}_{t+1}$ ist die nach dem Rebalancing erzielte Rendite und $\lambda_{TC}$ steuert, wie stark Transaktionskosten im Reward gewichtet werden. Dadurch wird der Agent für Rendite belohnt und gleichzeitig von häufigem oder unnötigem Trading abgehalten.
+$V_{t+1}$ enthält bereits die Transaktionskosten. Zusätzlich gilt
+$\lambda_{\mathrm{trade}} = 10\,\mathrm{bp}$ als Overtrading-Strafe auf den
+Reward (nicht noch einmal auf den Portfoliowert) und
+$\lambda_{\mathrm{align}} = 5\,\mathrm{bp}$ als Bonus, wenn die finale Richtung
+mit dem Alpha-Vorzeichen übereinstimmt.
 
-Weitere Risikoterme können später experimentell ergänzt werden. Sharpe Ratio, Maximum Drawdown, Volatilität, Turnover, Transaktionskosten sowie Gesamt- und annualisierte Rendite dienen zunächst primär der Evaluation.
+Sharpe Ratio, Maximum Drawdown, Volatilität, Turnover, Transaktionskosten
+sowie kumulierte und annualisierte Rendite dienen der Evaluation, nicht als
+zusätzliche Reward-Terme.
 
 ## 9. Baselines & Evaluation
 
 Die primäre Evaluation vergleicht zwei separat trainierte Residual-PPO-
 Systeme:
 
-1. **`market_only`**: Alpha-Modell mit marktbezogenen Merkmalen
+1. **`market_only`**: Alpha-Modell mit Market Features
 2. **`full_alpha`**: Alpha-Modell mit Markt- und Fundamentaldaten
 
-Beide PPO-Systeme verwenden denselben chronologischen Testsplit, dieselbe
-Environment-Konfiguration und einen deterministischen Rollout. Die PPO-
-Rollouts und die Referenzportfolios werden auf demselben Return-Fenster mit
-91 Perioden ausgewertet. Als wirtschaftliche Referenzen werden **Buy-and-
-Hold** und **Equal Weight** berichtet. Sie verwenden zwar dasselbe
-Return-Fenster, aber nicht die PPO-konsistente Cash-Ausgangslage und keine
-PPO-Environment-Transaktionskosten.
+Beide verwenden denselben chronologischen Testsplit, dieselbe
+Environment-Konfiguration (täglicher inkrementeller Default) und einen
+deterministischen Rollout. Die PPO-Rollouts und die Referenzportfolios werden
+auf demselben Return-Fenster mit 91 Perioden ausgewertet. Als wirtschaftliche
+Referenzen werden **Buy-and-Hold** und **Equal Weight** berichtet. Sie
+verwenden dasselbe Return-Fenster, aber nicht die PPO-Cash-Ausgangslage und
+keine PPO-Environment-Transaktionskosten.
 
-Alpha-Ranking, direkte Alpha-Regelportfolios und historische Regel-Baselines
-sind ergänzende Diagnostik und nicht der primäre PPO-Vergleich.
+Alpha-Ranking, direkte Alpha-Regelportfolios, `no_levels` und optionale
+20-Tage-Snapshot-Läufe sind ergänzende Diagnostik und nicht der primäre
+PPO-Vergleich.
 
 Die zentrale Forschungsfrage lautet:
 
@@ -361,43 +389,55 @@ Die zentrale Forschungsfrage lautet:
 ```text
 Data / Features      Informationen über Unternehmen und Markt
         ↓
-Alpha Model          Wie attraktiv ist die Aktie?
+Alpha Model          Wie attraktiv ist die Aktie? (aktive 20-Tage-Rendite)
         ↓
-Risk Adjustment      Wie stark ist das Signal relativ zum Risiko?
+Risk Adjustment      Wie stark ist das Signal relativ zur Volatilität?
         ↓
-Alpha Rule           Baseline-Handelsrichtung
+Alpha Rule           Baseline Buy / Hold / Sell (z-score)
         ↓
 RL Agent             Residual Down, Keep oder Up
         ↓
 Final Action         Sell, Hold oder Buy
         ↓
-Position Sizing      Wie groß soll der Trade sein?
+Position Sizing      Δw = a · B_t · q
         ↓
-Portfolio Layer      Ist der Trade innerhalb der Regeln möglich?
+Portfolio Layer      Clip, Gross-Cap, Min-Hold, Cash
         ↓
-Rebalancing          Portfolio Return − Costs → Reward
+Rebalancing          Log-Return nach Kosten − Penalty + Alignment
 ```
 
-Die Kernidee ist die klare Trennung der Verantwortlichkeiten:
+- **Alpha Model:** prognostiziert die erwartete Out-/Underperformance.
+- **Risk Adjustment:** bildet $z$ und $q$ aus Alpha und Volatilität.
+- **Alpha Rule:** setzt das Alpha in eine Baseline-Richtung um.
+- **RL Agent:** darf die Regel um höchstens einen Schritt verschieben.
+- **Position Sizing:** übersetzt Richtung und $q$ in Gewichtänderungen.
+- **Portfolio Layer:** erzwingt Long-only, $w_{max}$, Exposure- und Haltelimits.
 
-- **Alpha Model:** prognostiziert die zukünftige Attraktivität eines Assets.
-- **Risk Adjustment:** berücksichtigt das aktuelle Risiko.
-- **RL Agent:** modifiziert die Alpha-Regel über Residualaktionen.
-- **Final Action:** ergibt die tatsächlich ausgeführte Sell/Hold/Buy-Richtung.
-- **Position Sizing:** berechnet daraus konkrete Positionsänderungen.
-- **Portfolio Layer:** setzt Constraints durch und bestimmt die tatsächlich ausführbaren Trades.
+## 11. Implemented Defaults
 
-## 11. Open Design Decisions
+Die folgenden Werte sind der aktuelle Default, nicht offene Designfragen:
 
-Vor oder während der Implementierung sind noch festzulegen bzw. experimentell zu untersuchen:
+| Größe | Default |
+| --- | --- |
+| Universum | 20 Aktien (siehe Abschnitt 2) |
+| Prognosehorizont `H` | 20 Handelstage |
+| Alpha-Ziel | aktive Rendite vs. Cross-Section-Mittel |
+| Alpha-Modell | XGBoost |
+| Volatilitätsfenster | 20 Tage |
+| Rebalancing | täglich, `incremental` |
+| Residual-PPO | an, inkl. Keep-Prior und Imitation |
+| `w_max` | 0.2 |
+| Rebalancing-Budget `B_t` | 0.2 |
+| Transaktionskosten | 10 bp auf den Portfoliowert |
+| Reward | Log-Return nach Kosten, plus 10 bp Penalty und 5 bp Alignment |
+| Cash | Start 100 % Cash |
+| Buch | Long-only |
 
-- Aktienuniversum und Prognosehorizont `H`
-- Rebalancing-Frequenz
-- Features und Alpha-Modell, insbesondere XGBoost vs. LightGBM
-- Volatilitätsberechnung und Normalisierung des Risk-Adjusted Alpha
-- maximales Aktiengewicht `w_max` und Rebalancing-Budget `B_t`
-- Modellierung des Multi-Asset-Action-Spaces
-- PPO vs. DQN bzw. weitere RL-Algorithmen
-- genaue Reward Function und Transaktionskosten
-- Umgang mit Cash
-- Long-only vs. Short Selling
+Experimentell vorhanden, aber nicht der primäre Vergleich:
+
+- Snapshot-Rebalancing alle 20 Tage (`--match-alpha-horizon`)
+- Feature-Ablation `no_levels`
+- Quantile-Alpha-Regel
+- Short Selling (`--allow-short`)
+- SAC mit kontinuierlichem Action Space
+- direktes (nicht-residuales) PPO
